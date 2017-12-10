@@ -1,0 +1,11 @@
+[package]
+name = "metrics_api"
+version = "0.1.0"
+authors = ["garyemerson <gmohammadioun@gmail.com>"]
+
+[dependencies]
+postgres = { version = "0.15", features = ["with-chrono"] }
+chrono = "0.4"
+serde = "1.0.24"
+serde_json = "1.0.8"
+serde_derive = "1.0.24"

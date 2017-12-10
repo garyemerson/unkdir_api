@@ -1,0 +1,7 @@
+TODO
+----
+* Implement updating database remotely from rpi to macbook
+* Write sql queries for metric visualizations
+* Write API to query database from elm page
+    * JSON based
+* Setup metrics pages with elm graphs library

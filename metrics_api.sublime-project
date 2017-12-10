@@ -1,0 +1,99 @@
+// {
+//     "build_systems":
+//     [
+//         {
+//             "cmd":
+//             [
+//                 "elm-make",
+//                 "$file",
+//                 "--output=main.js",
+//                 "--report=json",
+//                 "--yes"
+//             ],
+//             "color_scheme": "Packages/CustomColorSchemes/Solarized (Light) Mod.tmTheme",
+//             "error_format": "-- $type: $tag - $file:$line:$column\n$message\n",
+//             "file_regex": "^\\-\\- \\w+: (?=.+ \\- (.+?):(\\d+):(\\d+))(.+) \\- .*$",
+//             "info_format": ":: $info\n",
+//             "linux":
+//             {
+//                 "path": "$HOME/.cabal/bin:/usr/local/bin:$PATH"
+//             },
+//             "name": "Puzzle",
+//             "null_device": "/dev/null",
+//             "osx":
+//             {
+//                 "path": "/usr/local/bin:$PATH"
+//             },
+//             "syntax": "Packages/Elm Language Support/Syntaxes/Elm Compile Messages.hidden-tmLanguage",
+//             "target": "elm_make",
+//             "variants":
+//             [
+//                 {
+//                     "cmd":
+//                     [
+//                         "elm-make",
+//                         "$file",
+//                         "--output={output}",
+//                         "--report=json",
+//                         "--yes"
+//                     ],
+//                     "name": "Puzzle Run"
+//                 },
+//                 {
+//                     "name": "Puzzle Ignore Warnings",
+//                     "warnings": "false"
+//                 },
+//                 {
+//                     "cmd":
+//                     [
+//                         "elm-make",
+//                         "$file",
+//                         "--output={output}",
+//                         "--report=json",
+//                         "--yes"
+//                     ],
+//                     "name": "Puzzle Run - Ignore Warnings",
+//                     "warnings": "false"
+//                 }
+//             ],
+//             "warnings": "true",
+//             "working_dir": "$project_path"
+//         }
+//     ],
+//     "folders":
+//     [
+//         {
+//             "path": "."
+//         },
+//         {
+//             "path": "/Users/Garrett/Dropbox/Files/workspaces/elm-architecture-tutorial"
+//         },
+//         {
+//             "path": "/Users/Garrett/Dropbox/Files/workspaces/elm-lang.org"
+//         }
+//     ]
+// }
+
+
+{
+	"folders":
+	[
+		{
+			"path": "."
+		}
+	],
+
+    "build_systems":
+    [
+        {
+            "cmd":
+            [
+                "ssh",
+                "pi@garspace.com",
+                "cd /home/pi/workspaces/website/metrics_api && /home/pi/.cargo/bin/cargo build"
+            ],
+            "name": "Metrics API Remote Build",
+            "syntax": "build_results.sublime-syntax",
+        }
+    ]
+}
