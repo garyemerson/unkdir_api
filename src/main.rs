@@ -19,10 +19,10 @@ const CONN_STR: &str = "postgres://Garrett@garspace.com/Garrett";
 fn main() {
     let (status, json_str): (i32, String) = match env::var("PATH_INFO") {
         Ok(path) => {
-            handle_request(path).unwrap_or_else(|e| e)
+            handle_request(path).unwrap_or_else(|e| (e.0, json_msg(&e.1)))
         },
         Err(_) => {
-            (404, error("Must specify resource"))
+            (404, json_msg("Must specify resource"))
         },
     };
     // body.push_str("\n");
@@ -49,60 +49,73 @@ fn main() {
 }
 
 fn handle_request(path: String) -> Result<(i32, String), (i32, String)> {
-    match path.as_ref() {
-        "/top" => {
+    let resource: Vec<&str> = path.split('/')
+        .skip(1)
+        .collect();
+    match &resource[..] {
+        ["top"] => {
             let usage = program_usage_by_hour()
-                .map_err(|e| (500, error(&format!("Error getting program usage: {}", e))))?;
+                .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
             let json_str = serde_json::to_string(&usage)
                 .map_err(|e| (500, format!("Error serializing to json: {}", e)))?;
             Ok((200, json_str))
         },
 
-        "/toplimit" => {
+        ["toplimit"] => {
             let usage = top_foo()
-                .map_err(|e| (500, error(&format!("Error getting program usage: {}", e))))?;
+                .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
             let json_str = serde_json::to_string(&usage)
                 .map_err(|e| (500, format!("Error serializing to json: {}", e)))?;
             Ok((200, json_str))
         },
 
-        "/timein" => {
+        ["timein"] => {
             let times = time_in()
-                .map_err(|e| (500, error(&format!("Error getting time in data: {}", e))))?;
+                .map_err(|e| (500, format!("Error getting time in data: {}", e)))?;
             let json_str = serde_json::to_string(&times)
                 .map_err(|e| (500, format!("Error serializing to json: {}", e)))?;
             Ok((200, json_str))
         },
 
-        "/visits" => {
+        ["visits", start, end] => {
+            let json_str = to_string_pretty(&json!({"message": format!("visit start is {} and end is {}", start, end)})).unwrap();
+            Ok((200, json_str))
+        }
+
+        ["visits"] => {
             let visits = visits()
-                .map_err(|e| (500, error(&format!("Error getting visit data: {}", e))))?;
+                .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
             let json_str = serde_json::to_string(&visits)
                 .map_err(|e| (500, format!("Error serializing to json: {}", e)))?;
             Ok((200, json_str))
         }
 
-        "/locations" => {
+        ["locations", start, end] => {
+            let json_str = to_string_pretty(&json!({"message": format!("location start is {} and end is {}", start, end)})).unwrap();
+            Ok((200, json_str))
+        }
+
+        ["locations"] => {
             let locations = locations()
-                .map_err(|e| (500, error(&format!("Error getting location data: {}", e))))?;
+                .map_err(|e| (500, format!("Error getting location data: {}", e)))?;
             let json_str = serde_json::to_string(&locations)
                 .map_err(|e| (500, format!("Error serializing to json: {}", e)))?;
             Ok((200, json_str))
         }
 
-        req_path => {
-            Ok((404, error(&format!("Unknown resource {}", req_path))))
+        _ => {
+            Ok((404, format!("Unknown resource {}", path)))
         },
     }
 }
 
-fn error(msg: &str) -> String {
+fn json_msg(msg: &str) -> String {
     to_string_pretty(&json!({"message": msg})).unwrap()
 }
 
 #[derive(Debug, Serialize)]
 struct Location {
-    date: String,
+    date: Option<String>,
     latitude: f64,
     longitude: f64,
     altitude: f64,
@@ -123,7 +136,7 @@ fn locations() -> Result<Vec<Location>, String> {
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Location {
-            date: row.get::<usize, Option<DateTime<Utc>>>(0).map_or("null".to_string(), |d| d.to_string()),
+            date: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
             latitude: row.get(1),
             longitude: row.get(2),
             altitude: row.get(3),
@@ -153,8 +166,8 @@ fn locations() -> Result<Vec<Location>, String> {
 
 #[derive(Debug, Serialize)]
 struct Visit {
-    arrival: String,
-    departure: String,
+    arrival: Option<String>,
+    departure: Option<String>,
     latitude: f64,
     longitude: f64,
     horizontal_accuracy: f64
@@ -170,8 +183,8 @@ fn visits() -> Result<Vec<Visit>, String> {
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Visit {
-            arrival: row.get::<usize, Option<DateTime<Utc>>>(0).map_or("null".to_string(), |d| d.to_string()),
-            departure: row.get::<usize, Option<DateTime<Utc>>>(1).map_or("null".to_string(), |d| d.to_string()),
+            arrival: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
+            departure: row.get::<usize, Option<DateTime<Utc>>>(1).map(|d| d.to_string()),
             latitude: row.get(2),
             longitude: row.get(3),
             horizontal_accuracy: row.get(4),
