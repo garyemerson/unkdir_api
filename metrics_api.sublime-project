@@ -12,7 +12,7 @@
             "cmd":
             [
                 "ssh",
-                "pi@garspace.com",
+                "pi@unkdir.com",
                 "cd /home/pi/workspaces/metrics_api && /home/pi/.cargo/bin/cargo build"
             ],
             "name": "Metrics API Remote Build",

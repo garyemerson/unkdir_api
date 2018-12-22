@@ -1,5 +1,8 @@
 TODO
 ----
+* locatoin data visualizatoins
+    * location path for a day (e.g. this day a year ago)
+    * list all location data points for area
 * Implement updating database remotely from rpi to macbook
 * Write sql queries for metric visualizations
 * Write API to query database from elm page
