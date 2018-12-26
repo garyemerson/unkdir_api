@@ -23,7 +23,7 @@ use image::imageops::{resize, overlay /*, brighten*/};
 use image::{ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
 
 
-const CONN_STR: &str = "postgres://Garrett@192.168.0.16/Garrett";
+const CONN_STR: &str = "postgres://localhost/Garrett";
 const MEME_FILE: &str = "/home/pi/meme_board/meme.png";
 const RAW_MEME_FILE: &str = "/home/pi/meme_board/meme_raw.png";
 const MEME_ID_FILE: &str = "/home/pi/meme_board/meme_id";
