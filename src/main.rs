@@ -23,7 +23,7 @@ use image::imageops::{resize, overlay /*, brighten*/};
 use image::{ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
 
 
-const CONN_STR: &str = "postgres://localhost/Garrett";
+const CONN_STR: &str = "postgres://Garrett@localhost/Garrett";
 const MEME_FILE: &str = "/home/pi/meme_board/meme.png";
 const RAW_MEME_FILE: &str = "/home/pi/meme_board/meme_raw.png";
 const MEME_ID_FILE: &str = "/home/pi/meme_board/meme_id";
@@ -181,6 +181,10 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                     let json = battery_history()
                         .map_err(|e| (500, format!("Error getting battery history: {}", e)))?;
                     Ok((200, json.into_bytes(), "application/json; charset=utf-8"))
+                },
+
+                ["foo"] => {
+                    Ok((200, "bar".to_string().into_bytes(), "text/plain"))
                 },
 
                 _ => {

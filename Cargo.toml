@@ -1,5 +1,5 @@
 [package]
-name = "metrics_api"
+name = "unkdir_api"
 version = "0.1.0"
 authors = ["garyemerson <gmohammadioun@gmail.com>"]
 
