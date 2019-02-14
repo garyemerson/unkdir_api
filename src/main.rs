@@ -9,25 +9,27 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-// use std::time::SystemTime;
+use chrono::{DateTime, Utc, Local, SecondsFormat};
+use postgres::{Connection, TlsMode};
+use serde_json::{to_string_pretty, Value};
+use image::imageops::{resize, overlay /*, brighten*/};
+use image::{ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+//use image::imageops::colorops::contrast;
+
+use std::time::SystemTime;
 use std::{str, env};
 use std::process::Command;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
-
-use chrono::{DateTime, Utc, Local};
-use postgres::{Connection, TlsMode};
-use serde_json::{to_string_pretty, Value};
-use image::imageops::{resize, overlay /*, brighten*/};
-//use image::imageops::colorops::contrast;
-use image::{ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+use std::path::Path;
 
 
 const CONN_STR: &str = "postgres://Garrett@localhost/Garrett";
-const MEME_FILE: &str = "/home/pi/meme_board/meme.png";
-const RAW_MEME_FILE: &str = "/home/pi/meme_board/meme_raw.png";
-const MEME_ID_FILE: &str = "/home/pi/meme_board/meme_id";
-const BATTERY_FILE_PATH: &str = "/home/pi/meme_board/battery_percent";
+const MEME_FILE: &str = "/root/unkdir/meme_board/meme.png";
+const RAW_MEME_FILE: &str = "/root/unkdir/meme_board/meme_raw.png";
+const MEME_ID_FILE: &str = "/root/unkdir/meme_board/meme_id";
+const BATTERY_FILE_PATH: &str = "/root/unkdir/meme_board/battery_percent";
+const ARCHIVE_DIR: &str = "/root/unkdir/meme_board/archive";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Visit {
@@ -55,12 +57,6 @@ fn main() {
     let (status, body, content_type): (i32, Vec<u8>, &str) = handle_request()
         .unwrap_or_else(|e| (e.0, json_msg(&e.1).into_bytes(), "application/json; charset=utf-8"));
 
-    // let mut body = format!("{:?}\n\n", SystemTime::now());
-    // for (key, value) in env::vars() {
-    //     body.push_str(&format!("{}: {}\n", key, value));
-    // }
-    // let body = body.into_bytes();
-
     let headers = [
         &format!("Status: {}", status),
         &format!("Content-type: {}", content_type),
@@ -80,9 +76,9 @@ fn main() {
 
 fn get_request_info() -> Result<(String, String), (i32, String)> {
     let path = env::var("PATH_INFO")
-        .or(Err((404, "Must specify resource".to_string())))?;
+        .or(Err((400, "Must specify resource".to_string())))?;
     let method = env::var("REQUEST_METHOD")
-        .or(Err((404, "Must specify method".to_string())))?;
+        .or(Err((400, "Must specify method".to_string())))?;
     Ok((path, method))
 }
 
@@ -102,6 +98,14 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                         .into_bytes();
                     Ok((200, json_str, "application/json; charset=utf-8"))
                 },
+
+                ["vars"] => {
+                    let mut body = format!("{:?}\n\n", SystemTime::now());
+                    for (key, value) in env::vars() {
+                        body.push_str(&format!("{}: {}\n", key, value));
+                    }
+                    Ok((200, body.into_bytes(), "text/plain"))
+                }
 
                 ["toplimit"] => {
                     let usage = top_foo()
@@ -188,7 +192,7 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 },
 
                 _ => {
-                    Err((404, format!("Unknown GET resource {}", path)))
+                    Err((400, format!("Unknown GET resource {}", path)))
                 },
             }
         },
@@ -234,13 +238,13 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 },
 
                 _ => {
-                    Err((404, format!("Unknown POST resource {}", path)))
+                    Err((400, format!("Unknown POST resource {}", path)))
                 },
             }
         },
 
         method => {
-            Err((404, format!("Unsupported method {}", method)))
+            Err((400, format!("Unsupported method {}", method)))
         }
     }
 
@@ -312,7 +316,7 @@ fn update_meme_from_url() -> Result<(), String> {
         .stdout;
 
     update_meme_from_bytes(img_bytes)
-        .map_err(|e| format!("Error updating meme from url: {}", e))?;
+        .map_err(|e| format!("Error updating meme from url bytes: {}", e))?;
 
     Ok(())
 }
@@ -322,19 +326,38 @@ fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error loading img from buffer with length {}: {}", img_bytes.len(), e))?;
     img.save(RAW_MEME_FILE)
         .map_err(|e| format!("Error saving raw img to file {}: {}", RAW_MEME_FILE, e))?;
+    archive_meme(&img)
+        .unwrap_or_else(|e| log_error(&format!("Error archiving meme: {}", e)));
     let formatted_img = format_img_for_kindle(img);
     formatted_img.save(MEME_FILE)
         .map_err(|e| format!("Error saving img to file {}: {}", MEME_FILE, e))?;
 
     let meme_id_raw = fs::read_to_string(MEME_ID_FILE)
         .map_err(|e| format!("Error reading meme_id file {}: {}", MEME_ID_FILE, e))?;
-    let meme_id = meme_id_raw.trim()
+    let meme_id = meme_id_raw
+        .trim()
         .parse::<i32>()
         .map_err(|e| format!("Error parsing '{}' as i32: {}", meme_id_raw, e))?;
     fs::write(MEME_ID_FILE, (meme_id + 1).to_string().into_bytes())
         .map_err(|e| format!("Error updating and saving meme id to file {}: {}", MEME_ID_FILE, e))?;
 
     Ok(())
+}
+
+fn archive_meme(img: &DynamicImage) -> Result<(), String> {
+    let timestamp  = Utc::now()
+        .to_rfc3339_opts(SecondsFormat::Secs, true)
+        .replace([':', '-'].as_ref(), "");
+    let filepath = if let Ok(ip) = env::var("REMOTE_ADDR") {
+        format!("{dir}/{time}-{ip}.png", dir = ARCHIVE_DIR, time = timestamp, ip = ip)
+    } else {
+        format!( "{dir}/{time}.png", dir = ARCHIVE_DIR, time = timestamp)
+    };
+    if Path::new(&filepath).exists() {
+        return Err("filename already exists".to_string());
+    }
+    img.save(&filepath)
+        .map_err(|e| format!("Error saving raw img to archive file {}: {}", filepath, e))
 }
 
 fn upload_visits(visits_json: String) -> Result<(), String> {
