@@ -351,7 +351,7 @@ fn archive_meme(img: &DynamicImage) -> Result<(), String> {
     let filepath = if let Ok(ip) = env::var("REMOTE_ADDR") {
         format!("{dir}/{time}-{ip}.png", dir = ARCHIVE_DIR, time = timestamp, ip = ip)
     } else {
-        format!( "{dir}/{time}.png", dir = ARCHIVE_DIR, time = timestamp)
+        format!("{dir}/{time}.png", dir = ARCHIVE_DIR, time = timestamp)
     };
     if Path::new(&filepath).exists() {
         return Err("filename already exists".to_string());
