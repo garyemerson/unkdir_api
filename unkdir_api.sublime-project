@@ -1,0 +1,22 @@
+{
+	"folders":
+	[
+		{
+			"path": "."
+		}
+	],
+
+    "build_systems":
+    [
+        {
+            "cmd":
+            [
+                "ssh",
+                "pi@unkdir.com",
+                "cd /home/pi/workspaces/metrics_api && /home/pi/.cargo/bin/cargo build"
+            ],
+            "name": "Metrics API Remote Build",
+            "syntax": "build_results.sublime-syntax",
+        }
+    ]
+}
