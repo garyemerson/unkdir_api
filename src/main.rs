@@ -9,17 +9,18 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-use chrono::{DateTime, Utc, Local, SecondsFormat};
+use chrono::{DateTime, Local, Utc, SecondsFormat};
 use postgres::{Connection, TlsMode};
 use serde_json::{to_string_pretty, Value};
 use image::imageops::{resize, overlay /*, brighten*/};
-use image::{ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+use image::{GenericImage, ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+use image::ImageOutputFormat;
 //use image::imageops::colorops::contrast;
 
 use std::time::SystemTime;
 use std::{str, env};
-use std::process::Command;
-use std::fs::{self, OpenOptions};
+use std::process::{Command, Stdio};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
@@ -27,6 +28,7 @@ use std::path::Path;
 const CONN_STR: &str = "postgres://Garrett@localhost/Garrett";
 const MEME_FILE: &str = "/root/unkdir/meme_board/meme.png";
 const RAW_MEME_FILE: &str = "/root/unkdir/meme_board/meme_raw.png";
+const COMPRESSED_MEME_FILE: &str = "/root/unkdir/meme_board/meme_compressed.png";
 const MEME_ID_FILE: &str = "/root/unkdir/meme_board/meme_id";
 const BATTERY_FILE_PATH: &str = "/root/unkdir/meme_board/battery_percent";
 const ARCHIVE_DIR: &str = "/root/unkdir/meme_board/archive";
@@ -328,10 +330,11 @@ fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error saving raw img to file {}: {}", RAW_MEME_FILE, e))?;
     archive_meme(&img)
         .unwrap_or_else(|e| log_error(&format!("Error archiving meme: {}", e)));
-    let formatted_img = format_img_for_kindle(img);
+    let formatted_img = format_img_for_kindle(&img);
     formatted_img.save(MEME_FILE)
         .map_err(|e| format!("Error saving img to file {}: {}", MEME_FILE, e))?;
-
+    compress_meme(&img)
+        .map_err(|e| format!("Error compressing img: {}", e))?;
     let meme_id_raw = fs::read_to_string(MEME_ID_FILE)
         .map_err(|e| format!("Error reading meme_id file {}: {}", MEME_ID_FILE, e))?;
     let meme_id = meme_id_raw
@@ -342,6 +345,37 @@ fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error updating and saving meme id to file {}: {}", MEME_ID_FILE, e))?;
 
     Ok(())
+}
+
+fn compress_meme(img: &DynamicImage) -> Result<(), String> {
+    let mut resized_img: DynamicImage = img.clone();
+    if resized_img.width() > 600 {
+        let width = 400;
+        let height = ((400 as f32 / resized_img.width() as f32) * (resized_img.height() as f32)) as u32;
+        resized_img = resized_img.resize(width, height, FilterType::CatmullRom);
+    }
+    let mut img_bytes = Vec::new();
+    resized_img.write_to(&mut img_bytes, ImageOutputFormat::PNG)
+        .map_err(|e| format!("Error writing resized bytes to buffer: {}", e))?;
+    let mut child = Command::new("pngquant")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Error starting pngquant cmd: {}", e))?;
+    {
+        let stdin = child.stdin.as_mut()
+            .ok_or("Unable to get stdin for child pngquant process".to_string())?;
+        stdin.write_all(&img_bytes)
+            .map_err(|e| format!("Error writing img bytes to pngquant process stdin: {}", e))?;
+    }
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Error reading stdout of pngquant: {}", e))?
+        .stdout;
+    File::create(COMPRESSED_MEME_FILE)
+        .map_err(|e| format!("Error creating file compressed meme file: {}", e))?
+        .write_all(&output)
+        .map_err(|e| format!("Error writing compressed bytes to file: {}", e))
 }
 
 fn archive_meme(img: &DynamicImage) -> Result<(), String> {
@@ -414,7 +448,7 @@ fn upload_locations(locations_json: String) -> Result<(), String> {
     Ok(())
 }
 
-fn format_img_for_kindle(dyn_img: DynamicImage) -> ImageBuffer<Luma<u8>, Vec<u8>> {
+fn format_img_for_kindle(dyn_img: &DynamicImage) -> ImageBuffer<Luma<u8>, Vec<u8>> {
     let width = 768;
     let height = 1024;
     let /*mut*/ img = dyn_img.to_luma();
@@ -471,7 +505,7 @@ fn save_battery_percentage(battery_percent: String) -> Result<(), String> {
 fn log_error(msg: &str) {
     eprintln!(
         "[{}] [cgi: metrics_api] {}",
-        Local::now(),
+        Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
         msg);
 }
 
