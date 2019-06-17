@@ -10,7 +10,9 @@ extern crate serde_json;
 extern crate serde_derive;
 
 use chrono::{DateTime, Local, Utc, SecondsFormat};
+use chrono::offset::FixedOffset;
 use postgres::{Connection, TlsMode};
+use postgres::types::ToSql;
 use serde_json::{to_string_pretty, Value};
 use image::imageops::{resize, overlay /*, brighten*/};
 use image::{GenericImage, ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
@@ -35,8 +37,8 @@ const ARCHIVE_DIR: &str = "/root/unkdir/meme_board/archive";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Visit {
-    arrival: Option<String>,
-    departure: Option<String>,
+    arrival: Option<DateTime<FixedOffset>>,
+    departure: Option<DateTime<FixedOffset>>,
     latitude: f64,
     longitude: f64,
     horizontal_accuracy: f64
@@ -44,7 +46,7 @@ struct Visit {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Location {
-    date: Option<String>,
+    date: DateTime<FixedOffset>,
     latitude: f64,
     longitude: f64,
     altitude: f64,
@@ -397,23 +399,31 @@ fn archive_meme(img: &DynamicImage) -> Result<(), String> {
 fn upload_visits(visits_json: String) -> Result<(), String> {
     let visits: Vec<Visit> = serde_json::from_str(&visits_json)
         .map_err(|e| format!("Error parsing visit data as json: {}", e))?;
+	// create a bunch of lines like:
+	// ($1, $2, ..., $5)
+	// ($6, $7, ..., $10)
+	let param_placeholders = (0..visits.len())
+		.map(|i|
+			format!("({})",((i*5+1)..=(i*5+5)).map(|p| format!("${}", p)).collect::<Vec<String>>().join(",")))
+		.collect::<Vec<String>>()
+		.join(",\n");
     let query = format!(
         "insert into visits (arrival,departure,latitude,longitude,horizontal_accuracy)\n\
         values\n{}",
-        visits.into_iter()
-            .map(|v| format!(
-                "({},{},{},{},{})",
-                if let Some(a) = v.arrival { format!("'{}'", a) } else { "NULL".to_string() },
-                if let Some(d) = v.departure { format!("'{}'", d) } else { "NULL".to_string() },
-                v.latitude,
-                v.longitude,
-                v.horizontal_accuracy))
-            .collect::<Vec<String>>()
-            .join(",\n"));
+		param_placeholders);
+	let params = visits.iter()
+		.map(|v| vec![
+			&v.arrival as &ToSql,
+			&v.departure as &ToSql,
+			&v.latitude as &ToSql,
+			&v.longitude as &ToSql,
+			&v.horizontal_accuracy as &ToSql])
+		.flatten()
+		.collect::<Vec<&ToSql>>();
 
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
-    conn.execute(&query, &[])
+    conn.execute(&query, &params)
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?;
 
     Ok(())
@@ -422,27 +432,35 @@ fn upload_visits(visits_json: String) -> Result<(), String> {
 fn upload_locations(locations_json: String) -> Result<(), String> {
     let locations: Vec<Location> = serde_json::from_str(&locations_json)
         .map_err(|e| format!("Error parsing location data as json: {}", e))?;
+	// create a bunch of lines like:
+	// ($1, $2, ..., $9)
+	// ($10, $11, ..., $18)
+	let param_placeholders = (0..locations.len())
+		.map(|i|
+			format!("({})",((i*9+1)..=(i*9+9)).map(|p| format!("${}", p)).collect::<Vec<String>>().join(",")))
+		.collect::<Vec<String>>()
+		.join(",\n");
     let query = format!(
         "insert into locations (date,latitude,longitude,altitude,horizontal_accuracy,vertical_accuracy,course,speed,floor)\n\
         values\n{}",
-        locations.into_iter()
-            .map(|l| format!(
-                "({},{},{},{},{},{},{},{},{})",
-                if let Some(d) = l.date { format!("'{}'", d) } else { "NULL".to_string() },
-                l.latitude,
-                l.longitude,
-                l.altitude,
-                l.horizontal_accuracy,
-                l.vertical_accuracy,
-                l.course.map(|c| c.to_string()).unwrap_or("NULL".to_string()),
-                l.speed.map(|s| s.to_string()).unwrap_or("NULL".to_string()),
-                l.floor.map(|f| f.to_string()).unwrap_or("NULL".to_string())))
-            .collect::<Vec<String>>()
-            .join(",\n"));
+        param_placeholders);
+	let params = locations.iter()
+		.map(|l| vec![
+			&l.date as &dyn ToSql,
+			&l.latitude as &dyn ToSql,
+			&l.longitude as &dyn ToSql,
+			&l.altitude as &dyn ToSql,
+			&l.horizontal_accuracy as &dyn ToSql,
+			&l.vertical_accuracy as &dyn ToSql,
+			&l.course as &dyn ToSql,
+			&l.speed as &dyn ToSql,
+			&l.floor as &dyn ToSql])
+		.flatten()
+		.collect::<Vec<&ToSql>>();
 
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
-    conn.execute(&query, &[])
+    conn.execute(&query, &params)
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?;
 
     Ok(())
@@ -529,7 +547,7 @@ fn locations_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<L
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Location {
-            date: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
+            date: row.get::<usize, DateTime<FixedOffset>>(0),
             latitude: row.get(1),
             longitude: row.get(2),
             altitude: row.get(3),
@@ -567,7 +585,7 @@ fn locations() -> Result<Vec<Location>, String> {
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Location {
-            date: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
+            date: row.get::<usize, DateTime<FixedOffset>>(0),
             latitude: row.get(1),
             longitude: row.get(2),
             altitude: row.get(3),
@@ -605,8 +623,8 @@ fn visits() -> Result<Vec<Visit>, String> {
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Visit {
-            arrival: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
-            departure: row.get::<usize, Option<DateTime<Utc>>>(1).map(|d| d.to_string()),
+            arrival: row.get::<usize, Option<DateTime<FixedOffset>>>(0),
+            departure: row.get::<usize, Option<DateTime<FixedOffset>>>(1),
             latitude: row.get(2),
             longitude: row.get(3),
             horizontal_accuracy: row.get(4),
@@ -631,8 +649,8 @@ fn visits_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Visi
         .map_err(|e| format!("Error executing query '{}': {}", query, e))?
         .iter()
         .map(|row| Visit {
-            arrival: row.get::<usize, Option<DateTime<Utc>>>(0).map(|d| d.to_string()),
-            departure: row.get::<usize, Option<DateTime<Utc>>>(1).map(|d| d.to_string()),
+            arrival: row.get::<usize, Option<DateTime<FixedOffset>>>(0),
+            departure: row.get::<usize, Option<DateTime<FixedOffset>>>(1),
             latitude: row.get(2),
             longitude: row.get(3),
             horizontal_accuracy: row.get(4),
