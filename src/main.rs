@@ -25,6 +25,7 @@ use std::process::{Command, Stdio};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::str::Split;
 
 
 const CONN_STR: &str = "postgres://Garrett@localhost/Garrett";
@@ -257,23 +258,18 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 fn battery_history() -> Result<String, String> {
     let stats_raw = fs::read_to_string(BATTERY_FILE_PATH)
         .map_err(|e| format!("Error reading battery file {}: {}", BATTERY_FILE_PATH, e))?;
-    let stats: Vec<Value> = stats_raw.split('\n')
-        .map(|l| l.split("||"))
-        .filter_map(|mut split_line| {
-            if split_line.clone().filter(|e| e.len() != 0).count() != 2 {
-                return None;
-            }
-            let date = split_line.next().expect("first elem for date");
-            let percent = split_line.next()
-                .expect("second elem for percent")
-                .parse::<i32>();
-            match percent {
-                Ok(percent) => Some(json!({"date": date, "percent": percent})),
-                Err(_) => None
-            }
+    //return Ok(stats_raw);
+    let stats: Vec</*String*/Value> = stats_raw.split('\n')
+        .map(|l: &str| l.split("||"))
+        .filter_map(|mut split_line: Split<'_, &str>| {
+            let date = split_line.next()?;
+            let percent = split_line.next()?.parse::<i32>().ok()?;
+            //Some(format!("{{\"date\": {}, \"percent\": {}}}", date, percent))
+            Some(json!({"date": date, "percent": percent}))
         })
         .collect();
 
+    //Ok(format!("[{}]", stats.join(",")))
     serde_json::to_string(&stats)
         .map_err(|e| format!("Error converting to json string: {}", e))
 }
@@ -403,8 +399,13 @@ fn upload_visits(visits_json: String) -> Result<(), String> {
 	// ($1, $2, ..., $5)
 	// ($6, $7, ..., $10)
 	let param_placeholders = (0..visits.len())
-		.map(|i|
-			format!("({})",((i*5+1)..=(i*5+5)).map(|p| format!("${}", p)).collect::<Vec<String>>().join(",")))
+		.map(|i| {
+            let comma_sep = ((i*5+1)..=(i*5+5))
+                .map(|p| format!("${}", p))
+                .collect::<Vec<String>>()
+                .join(",");
+			format!("({})", comma_sep)
+        })
 		.collect::<Vec<String>>()
 		.join(",\n");
     let query = format!(
@@ -436,8 +437,13 @@ fn upload_locations(locations_json: String) -> Result<(), String> {
 	// ($1, $2, ..., $9)
 	// ($10, $11, ..., $18)
 	let param_placeholders = (0..locations.len())
-		.map(|i|
-			format!("({})",((i*9+1)..=(i*9+9)).map(|p| format!("${}", p)).collect::<Vec<String>>().join(",")))
+		.map(|i| {
+            let comma_sep = ((i*9+1)..=(i*9+9))
+                .map(|p| format!("${}", p))
+                .collect::<Vec<String>>()
+                .join(",");
+			format!("({})", comma_sep)
+        })
 		.collect::<Vec<String>>()
 		.join(",\n");
     let query = format!(
@@ -475,8 +481,8 @@ fn format_img_for_kindle(dyn_img: &DynamicImage) -> ImageBuffer<Luma<u8>, Vec<u8
     let mut final_img: ImageBuffer<Luma<u8>, Vec<u8>> = img.clone();
     if img.width() != width || img.height() != height {
         let img_ratio = img.width() as f32 / img.height() as f32;
-        let scr_ratio = width as f32 / height as f32;
-        if img_ratio > scr_ratio {
+        let screen_ratio = width as f32 / height as f32;
+        if img_ratio > screen_ratio {
             // img wider than screen
             let ratio: f32 = width as f32 / img.width() as f32;
             let new_width = width;
