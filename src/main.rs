@@ -15,8 +15,9 @@ use postgres::{Connection, TlsMode};
 use postgres::types::ToSql;
 use serde_json::{to_string_pretty, Value};
 use image::imageops::{resize, overlay /*, brighten*/};
-use image::{GenericImage, ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+use image::{Pixel, GenericImageView, ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
 use image::ImageOutputFormat;
+use image::png::PNGEncoder;
 //use image::imageops::colorops::contrast;
 
 use std::time::SystemTime;
@@ -29,12 +30,13 @@ use std::str::Split;
 
 
 const CONN_STR: &str = "postgres://Garrett@localhost/Garrett";
-const MEME_FILE: &str = "/root/unkdir/meme_board/meme.png";
+const KINDLE_MEME_FILE: &str = "/root/unkdir/meme_board/meme.png";
 const RAW_MEME_FILE: &str = "/root/unkdir/meme_board/meme_raw.png";
-const COMPRESSED_MEME_FILE: &str = "/root/unkdir/meme_board/meme_compressed.png";
+const WEB_COMPRESSED_MEME_FILE: &str = "/root/unkdir/meme_board/meme_compressed.png";
 const MEME_ID_FILE: &str = "/root/unkdir/meme_board/meme_id";
 const BATTERY_FILE_PATH: &str = "/root/unkdir/meme_board/battery_percent";
 const ARCHIVE_DIR: &str = "/root/unkdir/meme_board/archive";
+const NOTES_FILE: &str = "/root/unkdir/doc_root/notes/contents";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Visit {
@@ -181,8 +183,8 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 },
 
                 ["meme"] => {
-                    let img_bytes = fs::read(MEME_FILE)
-                        .map_err(|e| (500, format!("Error reading meme file {}: {}", MEME_FILE, e)))?;
+                    let img_bytes = fs::read(KINDLE_MEME_FILE)
+                        .map_err(|e| (500, format!("Error reading meme file {}: {}", KINDLE_MEME_FILE, e)))?;
                     Ok((200, img_bytes, "image/png"))
                 },
 
@@ -205,20 +207,26 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
         "POST" => {
             match &resource[..] {
                 ["meme_status"] => {
-                    let meme_id = meme_status()
+                    let response_bytes = meme_status()
                         .map_err(|e| (500, format!("Error getting meme status: {}", e)))?;
-                    Ok((200, meme_id.into_bytes(), "text/plain"))
+                    Ok((200, response_bytes, "application/octet-stream"))
                 },
 
                 ["update_meme_url"] => {
                     update_meme_from_url()
                         .map_err(|e| (500, format!("Error updating meme from url: {}", e)))?;
-                    Ok((200, Vec::new(), "text/plain")) 
+                    Ok((200, Vec::new(), "text/plain"))
                 },
 
                 ["update_meme"] => {
                     update_meme()
                         .map_err(|e| (500, format!("Error updating meme: {}", e)))?;
+                    Ok((200, Vec::new(), "text/plain"))
+                },
+
+                ["update_notes"] => {
+                    update_notes()
+                        .map_err(|e| (500, format!("Error updating notes: {}", e)))?;
                     Ok((200, Vec::new(), "text/plain"))
                 },
 
@@ -255,11 +263,23 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
 }
 
+fn update_notes() -> Result<(), String> {
+    let mut notes_bytes = Vec::new();
+    io::stdin().read_to_end(&mut notes_bytes)
+        .map_err(|e| format!("Error reading notes bytes from stdin: {}", e))?;
+    let notes = str::from_utf8(&notes_bytes)
+        .map_err(|e| format!("Error parsing POST data as utf8 string: {}", e))?;
+    fs::write(NOTES_FILE, notes.to_string().into_bytes())
+        .map_err(|e| format!("Error writing notes to file {}: {}", NOTES_FILE, e))
+}
+
 fn battery_history() -> Result<String, String> {
     let stats_raw = fs::read_to_string(BATTERY_FILE_PATH)
         .map_err(|e| format!("Error reading battery file {}: {}", BATTERY_FILE_PATH, e))?;
     //return Ok(stats_raw);
     let stats: Vec</*String*/Value> = stats_raw.split('\n')
+        .rev()
+        .take(10_000)
         .map(|l: &str| l.split("||"))
         .filter_map(|mut split_line: Split<'_, &str>| {
             let date = split_line.next()?;
@@ -274,22 +294,41 @@ fn battery_history() -> Result<String, String> {
         .map_err(|e| format!("Error converting to json string: {}", e))
 }
 
-fn meme_status() -> Result<String, String> {
-    let mut battery_percent = String::new();
-    match io::stdin().read_to_string(&mut battery_percent) {
-        Ok(_) => {
-            save_battery_percentage(battery_percent)
-                .unwrap_or_else(|e| log_error(&format!("Error saving battery percentage: {}", e)));
-        },
-        Err(e) => {
-            log_error(&format!("Error reading battery percent from body from stdin: {}", e));
-        }
+fn meme_status() -> Result<Vec<u8>, String> {
+    let mut battery_percent_and_meme_id = String::new();
+    io::stdin().read_to_string(&mut battery_percent_and_meme_id)
+        .map_err(|e| format!("Error reading battery percent from body from stdin: {}", e))?;
+    let mut parts = battery_percent_and_meme_id.split(' ');
+    let battery_percent = parts.next().ok_or("Expected chunk for battery_percent but got nothing")?;
+    let kindle_meme_id_str = parts.next()
+        .ok_or("Expected chunk for kindle_meme_id but got nothing")?;
+    let kindle_meme_id = if kindle_meme_id_str.len() == 0 {
+        None
+    } else {
+        let id = kindle_meme_id_str
+            .parse::<i32>()
+            .map_err(|e| format!("Error parseing '{}' as i32 for kindle meme id: {}", kindle_meme_id_str, e))?;
+        Some(id)
+    };
+
+    save_battery_percentage(battery_percent.to_string())
+        .unwrap_or_else(|e| log_error(&format!("Error saving battery percentage: {}", e)));
+
+    let server_meme_id = fs::read_to_string(MEME_ID_FILE)
+        .map_err(|e| format!("Error reading meme id file {}: {}", MEME_ID_FILE, e))?
+        .trim()
+        .parse::<i32>()
+        .map_err(|e| format!("Error parseing server meme id to i32: {}", e))?;
+
+    let mut response_bytes: Vec<u8> = Vec::new();
+    response_bytes.append(&mut format!("{}\n", server_meme_id).as_bytes().to_vec());
+    if kindle_meme_id.is_none() || kindle_meme_id.expect("kindle_meme_id") != server_meme_id {
+        let mut img_bytes = fs::read(KINDLE_MEME_FILE)
+            .map_err(|e| format!("Error reading meme file {}: {}", KINDLE_MEME_FILE, e))?;
+        response_bytes.append(&mut img_bytes);
     }
 
-    let meme_id = fs::read_to_string(MEME_ID_FILE)
-        .map_err(|e| format!("Error reading meme_id file {}: {}", MEME_ID_FILE, e))?;
-
-    Ok(meme_id)
+    Ok(response_bytes)
 }
 
 fn update_meme() -> Result<(), String> {
@@ -328,9 +367,36 @@ fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error saving raw img to file {}: {}", RAW_MEME_FILE, e))?;
     archive_meme(&img)
         .unwrap_or_else(|e| log_error(&format!("Error archiving meme: {}", e)));
+
     let formatted_img = format_img_for_kindle(&img);
-    formatted_img.save(MEME_FILE)
-        .map_err(|e| format!("Error saving img to file {}: {}", MEME_FILE, e))?;
+    let mut png_bytes = Vec::new();
+    PNGEncoder::new(&mut png_bytes)
+        .encode(&formatted_img, formatted_img.width(), formatted_img.height(), <Luma<u8> as Pixel>::COLOR_TYPE)
+        .map_err(|e| format!("Error encoding formatted_img to png: {}", e))?;
+    let mut child = Command::new("convert")
+        .arg("-auto-gamma")
+        .arg("-auto-level")
+        .arg("-normalize")
+        .arg("png:-")
+        .arg("png:-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Error starting pngquant cmd: {}", e))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or("Unable to get stdin for child convert process".to_string())?
+        .write_all(&png_bytes)
+        .map_err(|e| format!("Error writing img bytes to convert process stdin: {}", e))?;
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Error reading stdout of convert: {}", e))?
+        .stdout;
+    File::create(KINDLE_MEME_FILE)
+        .map_err(|e| format!("Error creating file kindle meme file: {}", e))?
+        .write_all(&output)
+        .map_err(|e| format!("Error writing bytes to kindle meme file: {}", e))?;
+
     compress_meme(&img)
         .map_err(|e| format!("Error compressing img: {}", e))?;
     let meme_id_raw = fs::read_to_string(MEME_ID_FILE)
@@ -349,7 +415,7 @@ fn compress_meme(img: &DynamicImage) -> Result<(), String> {
     let mut resized_img: DynamicImage = img.clone();
     if resized_img.width() > 600 {
         let width = 400;
-        let height = ((400 as f32 / resized_img.width() as f32) * (resized_img.height() as f32)) as u32;
+        let height = ((400.0 / resized_img.width() as f32) * (resized_img.height() as f32)) as u32;
         resized_img = resized_img.resize(width, height, FilterType::CatmullRom);
     }
     let mut img_bytes = Vec::new();
@@ -370,7 +436,7 @@ fn compress_meme(img: &DynamicImage) -> Result<(), String> {
     let output = child.wait_with_output()
         .map_err(|e| format!("Error reading stdout of pngquant: {}", e))?
         .stdout;
-    File::create(COMPRESSED_MEME_FILE)
+    File::create(WEB_COMPRESSED_MEME_FILE)
         .map_err(|e| format!("Error creating file compressed meme file: {}", e))?
         .write_all(&output)
         .map_err(|e| format!("Error writing compressed bytes to file: {}", e))
@@ -414,13 +480,13 @@ fn upload_visits(visits_json: String) -> Result<(), String> {
 		param_placeholders);
 	let params = visits.iter()
 		.map(|v| vec![
-			&v.arrival as &ToSql,
-			&v.departure as &ToSql,
-			&v.latitude as &ToSql,
-			&v.longitude as &ToSql,
-			&v.horizontal_accuracy as &ToSql])
+			&v.arrival as &dyn ToSql,
+			&v.departure as &dyn ToSql,
+			&v.latitude as &dyn ToSql,
+			&v.longitude as &dyn ToSql,
+			&v.horizontal_accuracy as &dyn ToSql])
 		.flatten()
-		.collect::<Vec<&ToSql>>();
+		.collect::<Vec<&dyn ToSql>>();
 
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
@@ -462,7 +528,7 @@ fn upload_locations(locations_json: String) -> Result<(), String> {
 			&l.speed as &dyn ToSql,
 			&l.floor as &dyn ToSql])
 		.flatten()
-		.collect::<Vec<&ToSql>>();
+		.collect::<Vec<&dyn ToSql>>();
 
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
@@ -534,7 +600,9 @@ fn log_error(msg: &str) {
 }
 
 fn json_msg(msg: &str) -> String {
-    to_string_pretty(&json!({"message": msg})).unwrap()
+    let mut s = to_string_pretty(&json!({"message": msg})).unwrap();
+    s.retain(|c| c != '\n');
+    s
 }
 
 fn locations_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Location>, String> {
