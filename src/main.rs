@@ -2,10 +2,11 @@ use serde_json::{to_string_pretty, json};
 
 use chrono::{DateTime, Utc, SecondsFormat};
 
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use std::{str, env};
-use std::fs;
+use std::{fs, thread};
 use std::io::{self, Read, Write};
+use std::process::Command;
 
 use metrics::program_usage_by_hour;
 use metrics::top_foo;
@@ -27,6 +28,7 @@ mod meme;
 mod metrics;
 
 
+const NOTES_DIR: &str = "/root/unkdir/doc_root/notes";
 const NOTES_FILE: &str = "/root/unkdir/doc_root/notes/contents";
 
 fn main() {
@@ -74,6 +76,13 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                         .into_bytes();
                     Ok((200, json_str, "application/json; charset=utf-8"))
                 },
+
+                ["sleep", num_secs_str] => {
+                    let num_secs = num_secs_str.parse::<u64>()
+                        .map_err(|e| (500, format!("Error parsing '{}' as u64: {}", num_secs_str, e)))?;
+                    thread::sleep(Duration::from_secs(num_secs));
+                    Ok((200, format!("{:?}", SystemTime::now()).into_bytes(), "text/plain"))
+                }
 
                 ["vars"] => {
                     let mut body = format!("{:?}\n\n", SystemTime::now());
@@ -232,6 +241,15 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
 }
 
+macro_rules! log_error {
+    ($($tts:tt)*) => {
+        eprintln!(
+			"[{}] [cgi: unkdir_api] {}",
+			Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+			format!($($tts)*));
+    }
+}
+
 fn update_notes() -> Result<(), String> {
     let mut notes_bytes = Vec::new();
     io::stdin().read_to_end(&mut notes_bytes)
@@ -239,7 +257,32 @@ fn update_notes() -> Result<(), String> {
     let notes = str::from_utf8(&notes_bytes)
         .map_err(|e| format!("Error parsing POST data as utf8 string: {}", e))?;
     fs::write(NOTES_FILE, notes.to_string().into_bytes())
-        .map_err(|e| format!("Error writing notes to file {}: {}", NOTES_FILE, e))
+        .map_err(|e| format!("Error writing notes to file {}: {}", NOTES_FILE, e))?;
+    env::set_current_dir(NOTES_DIR)
+        .map_err(|e| format!("Error changing directory to {}: {}", NOTES_DIR, e))?;
+    env::set_var("GIT_DIR", "history");
+    env::set_var("GIT_WORK_TREE", ".");
+    let status_output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .arg(NOTES_FILE)
+        .output()
+        .map_err(|e| format!("Error excuting git status on file {}: {}", NOTES_FILE, e))?;
+    log_error!("status stdout: '{}'", str::from_utf8(&status_output.stdout).unwrap());
+    log_error!("status stderr: '{}'", str::from_utf8(&status_output.stderr).unwrap());
+    if status_output.stdout.as_slice().starts_with(b" M") {
+        let commit_output = Command::new("git")
+            .arg("commit")
+            .arg("--allow-empty-message")
+            .arg("-am")
+            .arg("")
+            .output()
+            .map_err(|e| format!("Error excuting git commit: {}", e))?;
+        log_error!("commit stdout: '{}'", str::from_utf8(&commit_output.stdout).unwrap());
+        log_error!("commit stderr: '{}'", str::from_utf8(&commit_output.stderr).unwrap());
+    }
+
+    Ok(())
 }
 
 fn log_error(msg: &str) {

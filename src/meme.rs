@@ -1,16 +1,16 @@
 use chrono::{Local, Utc, SecondsFormat};
 //use image::imageops::colorops::contrast;
-use image::imageops::{resize, overlay /*, brighten*/};
-use image::ImageOutputFormat;
-use image::png::PNGEncoder;
-use image::{Pixel, GenericImageView, ImageBuffer, Luma, DynamicImage, FilterType, load_from_memory};
+// use image::imageops::{resize, overlay /*, brighten*/};
+// use image::ImageOutputFormat;
+// use image::png::PNGEncoder;
+// use image::{Pixel, GenericImageView, ImageBuffer, Luma, DynamicImage, FilterType};
 use serde_json::{Value, json};
 
 use std::{str, env};
 use std::process::{Command, Stdio};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::Path;
+// use std::path::Path;
 use std::str::Split;
 
 use crate::log_error;
@@ -110,49 +110,23 @@ pub(crate) fn update_meme_from_url() -> Result<(), String> {
 }
 
 pub(crate) fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
-    let img = load_from_memory(&img_bytes)
+    let processed_img_bytes = load_from_memory(&img_bytes)
         .map_err(|e| format!("Error loading img from buffer with length {}: {}", img_bytes.len(), e))?;
-    img.save(RAW_MEME_FILE)
-        .map_err(|e| format!("Error saving raw img to file {}: {}", RAW_MEME_FILE, e))?;
-    archive_meme(&img)
+    File::create(RAW_MEME_FILE)
+        .map_err(|e| format!("Error creating raw img to file {}: {}", RAW_MEME_FILE, e))?
+        .write_all(&processed_img_bytes)
+        .map_err(|e| format!("Error writing bytes to raw img file: {}", e))?;
+
+    archive_meme(&processed_img_bytes)
         .unwrap_or_else(|e| log_error(&format!("Error archiving meme: {}", e)));
-
-    let formatted_img = format_img_for_kindle(&img);
-    let mut png_bytes = Vec::new();
-    PNGEncoder::new(&mut png_bytes)
-        .encode(&formatted_img, formatted_img.width(), formatted_img.height(), <Luma<u8> as Pixel>::COLOR_TYPE)
-        .map_err(|e| format!("Error encoding formatted_img to png: {}", e))?;
-    let mut child = Command::new("convert")
-        .arg("-auto-gamma")
-        .arg("-auto-level")
-        .arg("-normalize")
-        .arg("png:-")
-        .arg("png:-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Error starting pngquant cmd: {}", e))?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("Unable to get stdin for child convert process".to_string())?
-        .write_all(&png_bytes)
-        .map_err(|e| format!("Error writing img bytes to convert process stdin: {}", e))?;
-    let output = child.wait_with_output()
-        .map_err(|e| format!("Error reading stdout of convert: {}", e))?
-        .stdout;
-    File::create(KINDLE_MEME_FILE)
-        .map_err(|e| format!("Error creating file kindle meme file: {}", e))?
-        .write_all(&output)
-        .map_err(|e| format!("Error writing bytes to kindle meme file: {}", e))?;
-
-    compress_meme(&img)
+    create_kindle_format_img(&processed_img_bytes)
+        .map_err(|e| format!("Error formatting for kindle: {}", e))?;
+    compress_meme(&processed_img_bytes)
         .map_err(|e| format!("Error compressing img: {}", e))?;
+
     let meme_id_raw = fs::read_to_string(MEME_ID_FILE)
         .map_err(|e| format!("Error reading meme_id file {}: {}", MEME_ID_FILE, e))?;
-    let meme_id = meme_id_raw
-        .trim()
-        .parse::<i32>()
+    let meme_id = meme_id_raw.trim().parse::<i32>()
         .map_err(|e| format!("Error parsing '{}' as i32: {}", meme_id_raw, e))?;
     fs::write(MEME_ID_FILE, (meme_id + 1).to_string().into_bytes())
         .map_err(|e| format!("Error updating and saving meme id to file {}: {}", MEME_ID_FILE, e))?;
@@ -160,38 +134,63 @@ pub(crate) fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
-fn compress_meme(img: &DynamicImage) -> Result<(), String> {
-    let mut resized_img: DynamicImage = img.clone();
-    if resized_img.width() > 600 {
-        let width = 400;
-        let height = ((400.0 / resized_img.width() as f32) * (resized_img.height() as f32)) as u32;
-        resized_img = resized_img.resize(width, height, FilterType::CatmullRom);
-    }
-    let mut img_bytes = Vec::new();
-    resized_img.write_to(&mut img_bytes, ImageOutputFormat::PNG)
-        .map_err(|e| format!("Error writing resized bytes to buffer: {}", e))?;
-    let mut child = Command::new("pngquant")
-        .arg("-")
+fn load_from_memory(img_bytes: &Vec<u8>) -> Result<Vec<u8>, String> {
+    let mut child = Command::new("convert")
+        .arg("-auto-orient")
+        .arg("-").arg("png:-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Error starting pngquant cmd: {}", e))?;
-    {
-        let stdin = child.stdin.as_mut()
-            .ok_or("Unable to get stdin for child pngquant process".to_string())?;
-        stdin.write_all(&img_bytes)
-            .map_err(|e| format!("Error writing img bytes to pngquant process stdin: {}", e))?;
-    }
+        .map_err(|e| format!("Error starting convert cmd: {}", e))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or("Unable to get stdin for child convert process".to_string())?
+        .write_all(&img_bytes)
+        .map_err(|e| format!("Error writing img bytes to convert process stdin from: {}", e))?;
     let output = child.wait_with_output()
-        .map_err(|e| format!("Error reading stdout of pngquant: {}", e))?
-        .stdout;
+        .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
+    if !output.status.success() {
+        let msg = format!(
+            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+        return Err(msg);
+    }
+    Ok(output.stdout)
+}
+
+fn compress_meme(img_bytes: &Vec<u8>) -> Result<(), String> {
+    // convert -resize 400 - png:-
+    let mut child = Command::new("convert")
+        .arg("-resize").arg("400")
+        .arg("-").arg("png:-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Error starting convert cmd: {}", e))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or("Unable to get stdin for child convert process".to_string())?
+        .write_all(&img_bytes)
+        .map_err(|e| format!("Error writing {} img bytes to convert process stdin: {}", img_bytes.len(), e))?;
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
+    if !output.status.success() {
+        let msg = format!(
+            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+        return Err(msg);
+    }
     File::create(WEB_COMPRESSED_MEME_FILE)
         .map_err(|e| format!("Error creating file compressed meme file: {}", e))?
-        .write_all(&output)
+        .write_all(&output.stdout)
         .map_err(|e| format!("Error writing compressed bytes to file: {}", e))
 }
 
-fn archive_meme(img: &DynamicImage) -> Result<(), String> {
+fn archive_meme(img_bytes: &Vec<u8>) -> Result<(), String> {
     let timestamp  = Utc::now()
         .to_rfc3339_opts(SecondsFormat::Secs, true)
         .replace([':', '-'].as_ref(), "");
@@ -200,53 +199,54 @@ fn archive_meme(img: &DynamicImage) -> Result<(), String> {
     } else {
         format!("{dir}/{time}.png", dir = ARCHIVE_DIR, time = timestamp)
     };
-    if Path::new(&filepath).exists() {
-        return Err("filename already exists".to_string());
-    }
-    img.save(&filepath)
-        .map_err(|e| format!("Error saving raw img to archive file {}: {}", filepath, e))
+    File::create(&filepath)
+        .map_err(|e| format!("Error creating archive file {}: {}", filepath, e))?
+        .write_all(&img_bytes)
+        .map_err(|e| format!("Error writing bytes to img file {}: {}", filepath, e))
 }
 
-fn format_img_for_kindle(dyn_img: &DynamicImage) -> ImageBuffer<Luma<u8>, Vec<u8>> {
+fn create_kindle_format_img(img_bytes: &Vec<u8>) -> Result<(), String> {
+    // convert -resize 768x1024 -extent 768x1024 -gravity center -background black -grayscale Rec709Luma -strip -auto-gamma -auto-level -normalize - png:-
     let width = 768;
     let height = 1024;
-    let /*mut*/ img = dyn_img.to_luma();
-    // img = brighten(&img, 50);
-    // img = contrast(&img, 30.0);
-    let mut final_img: ImageBuffer<Luma<u8>, Vec<u8>> = img.clone();
-    if img.width() != width || img.height() != height {
-        let img_ratio = img.width() as f32 / img.height() as f32;
-        let screen_ratio = width as f32 / height as f32;
-        if img_ratio > screen_ratio {
-            // img wider than screen
-            let ratio: f32 = width as f32 / img.width() as f32;
-            let new_width = width;
-            let new_height = (img.height() as f32 * ratio) as u32;
-
-            // log(&format!("resizing to {}w x {}h to fit to screen size {}w x {}h", new_width, new_height, width, height));
-            let resized_img = resize(&img, new_width, new_height, FilterType::CatmullRom);
-
-            // overlaying onto black background and centering vertically
-            let vertical_padding = ((height - new_height) as f32 / 2.0) as u32;
-            final_img = ImageBuffer::from_pixel(width, height, Luma([0]));
-            overlay(&mut final_img, &resized_img, 0, vertical_padding);
-        } else {
-            // img taller than screen
-            let ratio: f32 = height as f32 / img.height() as f32;
-            let new_width = (img.width() as f32 * ratio) as u32;
-            let new_height = height;
-
-            // log(&format!("resizing to {}w x {}h to fit to screen size {}w x {}h", new_width, new_height, width, height));
-            let resized_img = resize(&img, new_width, new_height, FilterType::CatmullRom);
-
-            // overlaying onto black background and centering horizontally
-            let horizontal_padding = ((width - new_width) as f32 / 2.0) as u32;
-            final_img = ImageBuffer::from_pixel(width, height, Luma([0]));
-            overlay(&mut final_img, &resized_img, horizontal_padding, 0);
-        };
+    let wh = format!("{}x{}", width, height);
+    let args = [
+        "-resize", &wh,
+        "-extent", &wh,
+        "-gravity", "center",
+        "-background", "black",
+        "-grayscale", "Rec709Luma",
+        "-strip",
+        "-auto-gamma",
+        "-auto-level",
+        "-normalize",
+        "-",
+        "png:-"];
+    let mut child = Command::new("convert")
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Error starting convert cmd: {}", e))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or("Unable to get stdin for child convert process".to_string())?
+        .write_all(&img_bytes)
+        .map_err(|e| format!("Error writing img bytes to convert process stdin from: {}", e))?;
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
+    if !output.status.success() {
+        let msg = format!(
+            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+        return Err(msg);
     }
-
-    final_img
+    File::create(KINDLE_MEME_FILE)
+        .map_err(|e| format!("Error creating file kindle meme file: {}", e))?
+        .write_all(&output.stdout)
+        .map_err(|e| format!("Error writing bytes to kindle meme file: {}", e))
 }
 
 fn save_battery_percentage(battery_percent: String) -> Result<(), String> {
