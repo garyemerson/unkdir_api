@@ -96,17 +96,30 @@ pub(crate) fn update_meme_from_url() -> Result<(), String> {
     let url = str::from_utf8(&url_bytes)
         .map_err(|e| format!("Error parsing POST data as utf8 string: {}", e))?;
 
-    let img_bytes = Command::new("curl")
+    let child = Command::new("curl")
         .arg("--location")
+        .arg("--silent")
+        .arg("--fail")
+        .arg("--show-error")
         .arg(url)
-        .output()
-        .map_err(|e| format!("Error excuting curl on url '{}': {}", url, e))?
-        .stdout;
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Error starting curl cmd: {}", e))?;
+    let output = child.wait_with_output()
+        .map_err(|e| format!("Error waiting on output from curl: {}", e))?;
+    if !output.status.success() {
+        let msg = format!(
+            "curl returned non-zero exist status of '{}'\nstdout: {}\nstderr: {}",
+            output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
+            str::from_utf8(&output.stdout).unwrap_or("<error convert stdout to utf8>"),
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8>"));
+        return Err(msg);
+    }
 
-    update_meme_from_bytes(img_bytes)
-        .map_err(|e| format!("Error updating meme from url bytes: {}", e))?;
-
-    Ok(())
+    update_meme_from_bytes(output.stdout)
+        .map_err(|e| format!("Error updating meme from url bytes: {}", e))
 }
 
 pub(crate) fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
@@ -152,9 +165,9 @@ fn load_from_memory(img_bytes: &Vec<u8>) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
     if !output.status.success() {
         let msg = format!(
-            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            "convert returned non-zero exist status of '{}'. Stderr: {}",
             output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
-            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8>"));
         return Err(msg);
     }
     Ok(output.stdout)
@@ -179,9 +192,9 @@ fn compress_meme(img_bytes: &Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
     if !output.status.success() {
         let msg = format!(
-            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            "convert returned non-zero exist status of '{}'. Stderr: {}",
             output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
-            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8>"));
         return Err(msg);
     }
     File::create(WEB_COMPRESSED_MEME_FILE)
@@ -238,9 +251,9 @@ fn create_kindle_format_img(img_bytes: &Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error reading stdout of convert: {}", e))?;
     if !output.status.success() {
         let msg = format!(
-            "convert returned non-zere exist status of '{}'. Stderr: {}",
+            "convert returned non-zero exist status of '{}'. Stderr: {}",
             output.status.code().map(|c| c.to_string()).unwrap_or("<none>".to_string()),
-            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8"));
+            str::from_utf8(&output.stderr).unwrap_or("<error convert stderr to utf8>"));
         return Err(msg);
     }
     File::create(KINDLE_MEME_FILE)
