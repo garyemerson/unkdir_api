@@ -13,7 +13,6 @@ use std::io::{self, Read, Write};
 // use std::path::Path;
 use std::str::Split;
 
-use crate::log_error;
 
 const KINDLE_MEME_FILE: &str = "/root/unkdir/meme_board/meme.png";
 const RAW_MEME_FILE: &str = "/root/unkdir/meme_board/meme_raw.png";
@@ -61,7 +60,7 @@ pub(crate) fn meme_status() -> Result<Vec<u8>, String> {
     };
 
     save_battery_percentage(battery_percent.to_string())
-        .unwrap_or_else(|e| log_error(&format!("Error saving battery percentage: {}", e)));
+        .unwrap_or_else(|e| log_error!("Error saving battery percentage: {}", e));
 
     let server_meme_id = fs::read_to_string(MEME_ID_FILE)
         .map_err(|e| format!("Error reading meme id file {}: {}", MEME_ID_FILE, e))?
@@ -131,7 +130,7 @@ pub(crate) fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Error writing bytes to raw img file: {}", e))?;
 
     archive_meme(&processed_img_bytes)
-        .unwrap_or_else(|e| log_error(&format!("Error archiving meme: {}", e)));
+        .unwrap_or_else(|e| log_error!("Error archiving meme: {}", e));
     create_kindle_format_img(&processed_img_bytes)
         .map_err(|e| format!("Error formatting for kindle: {}", e))?;
     compress_meme(&processed_img_bytes)
@@ -230,9 +229,9 @@ fn create_kindle_format_img(img_bytes: &Vec<u8>) -> Result<(), String> {
         "-background", "black",
         "-grayscale", "Rec709Luma",
         "-strip",
-        "-auto-gamma",
-        "-auto-level",
-        "-normalize",
+        // "-auto-gamma",
+        // "-auto-level",
+        // "-normalize",
         "-",
         "png:-"];
     let mut child = Command::new("convert")

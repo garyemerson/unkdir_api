@@ -8,25 +8,21 @@ use std::{fs, thread};
 use std::io::{self, Read, Write};
 use std::process::Command;
 
-use metrics::program_usage_by_hour;
-use metrics::top_foo;
-use metrics::time_in;
-use metrics::visits_start_end;
-use metrics::visits;
-use metrics::locations_start_end;                                                                                                              
-use metrics::locations;                                                                                                                        
-use metrics::upload_visits;                                                                                                                    
-use metrics::upload_locations;
+use metrics::{program_usage_by_hour, top_foo, time_in, visits_start_end, visits,
+    locations_start_end, locations, upload_visits, upload_locations};
+use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
 
-use meme::battery_history;                                                                                                                     
-use meme::meme_status;
-use meme::update_meme_from_url;
-use meme::update_meme;
-// use meme::KINDLE_MEME_FILE;
+macro_rules! log_error {
+    ($($tts:tt)*) => {
+        eprintln!(
+            "[{}] [cgi: unkdir_api] {}",
+            Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            format!($($tts)*));
+    }
+}
 
 mod meme;
 mod metrics;
-
 
 const NOTES_DIR: &str = "/root/unkdir/doc_root/notes";
 const NOTES_FILE: &str = "/root/unkdir/doc_root/notes/contents";
@@ -241,15 +237,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
 }
 
-macro_rules! log_error {
-    ($($tts:tt)*) => {
-        eprintln!(
-			"[{}] [cgi: unkdir_api] {}",
-			Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-			format!($($tts)*));
-    }
-}
-
 fn update_notes() -> Result<(), String> {
     let mut notes_bytes = Vec::new();
     io::stdin().read_to_end(&mut notes_bytes)
@@ -283,13 +270,6 @@ fn update_notes() -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn log_error(msg: &str) {
-    eprintln!(
-        "[{}] [cgi: metrics_api] {}",
-        Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-        msg);
 }
 
 fn json_msg(msg: &str) -> String {
