@@ -21,7 +21,7 @@ const MEME_ID_FILE: &str = "/root/unkdir/meme_board/meme_id";
 const BATTERY_FILE_PATH: &str = "/root/unkdir/meme_board/battery_percent";
 const ARCHIVE_DIR: &str = "/root/unkdir/meme_board/archive";
 
-pub(crate) fn battery_history() -> Result<String, String> {
+fn battery_history_helper() -> Result<String, String> {
     let stats_raw = fs::read_to_string(BATTERY_FILE_PATH)
         .map_err(|e| format!("Error reading battery file {}: {}", BATTERY_FILE_PATH, e))?;
     //return Ok(stats_raw);
@@ -42,7 +42,13 @@ pub(crate) fn battery_history() -> Result<String, String> {
         .map_err(|e| format!("Error converting to json string: {}", e))
 }
 
-pub(crate) fn meme_status() -> Result<Vec<u8>, String> {
+pub(crate) fn battery_history() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let json = battery_history_helper()
+        .map_err(|e| (500, format!("Error getting battery history: {}", e)))?;
+    Ok((200, json.into_bytes(), "application/json; charset=utf-8"))
+}
+
+pub(crate) fn meme_status_helper() -> Result<Vec<u8>, String> {
     let mut battery_percent_and_meme_id = String::new();
     io::stdin().read_to_string(&mut battery_percent_and_meme_id)
         .map_err(|e| format!("Error reading battery percent from body from stdin: {}", e))?;
@@ -79,7 +85,13 @@ pub(crate) fn meme_status() -> Result<Vec<u8>, String> {
     Ok(response_bytes)
 }
 
-pub(crate) fn update_meme() -> Result<(), String> {
+pub(crate) fn meme_status() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let response_bytes = meme_status_helper()
+        .map_err(|e| (500, format!("Error getting meme status: {}", e)))?;
+    Ok((200, response_bytes, "application/octet-stream"))
+}
+
+fn update_meme_helper() -> Result<(), String> {
     let mut img_bytes = Vec::new();
     io::stdin().read_to_end(&mut img_bytes)
         .map_err(|e| format!("Error reading img bytes from stdin: {}", e))?;
@@ -88,7 +100,13 @@ pub(crate) fn update_meme() -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn update_meme_from_url() -> Result<(), String> {
+pub(crate) fn update_meme() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    update_meme_helper()
+        .map_err(|e| (500, format!("Error updating meme: {}", e)))?;
+    Ok((200, Vec::new(), "text/plain"))
+}
+
+fn update_meme_from_url_helper() -> Result<(), String> {
     let mut url_bytes = Vec::new();
     io::stdin().read_to_end(&mut url_bytes)
         .map_err(|e| format!("Error reading url bytes from stdin: {}", e))?;
@@ -119,6 +137,12 @@ pub(crate) fn update_meme_from_url() -> Result<(), String> {
 
     update_meme_from_bytes(output.stdout)
         .map_err(|e| format!("Error updating meme from url bytes: {}", e))
+}
+
+pub(crate) fn update_meme_from_url() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    update_meme_from_url_helper()
+        .map_err(|e| (500, format!("Error updating meme from url: {}", e)))?;
+    Ok((200, Vec::new(), "text/plain"))
 }
 
 pub(crate) fn update_meme_from_bytes(img_bytes: Vec<u8>) -> Result<(), String> {

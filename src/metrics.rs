@@ -1,3 +1,5 @@
+use std::io::{self, Read};
+
 use serde::{Serialize, Deserialize};
 
 use chrono::{DateTime, Utc};
@@ -30,7 +32,7 @@ pub(crate) struct Location {
     floor: Option<i32>,
 }
 
-pub(crate) fn locations_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Location>, String> {
+pub(crate) fn locations_start_end_helper(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Location>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -74,7 +76,23 @@ pub(crate) fn locations_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> R
     Ok(results)
 }
 
-pub(crate) fn locations() -> Result<Vec<Location>, String> {
+pub(crate) fn locations_start_end(start: &str, end: &str) -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let start = DateTime::parse_from_rfc3339(start)
+        .map_err(|e| (500, format!("Error parsing '{}' as start date: {}", start, e)))?
+        .with_timezone(&Utc);
+    let end = DateTime::parse_from_rfc3339(end)
+        .map_err(|e| (500, format!("Error parsing '{}' as end date: {}", end, e)))?
+        .with_timezone(&Utc);
+
+    let locations = locations_start_end_helper(start, end)
+        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
+    let json_str = serde_json::to_string(&locations)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+fn locations_helper() -> Result<Vec<Location>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -112,7 +130,16 @@ pub(crate) fn locations() -> Result<Vec<Location>, String> {
     Ok(results)
 }
 
-pub(crate) fn visits() -> Result<Vec<Visit>, String> {
+pub(crate) fn locations() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let locations = locations_helper()
+        .map_err(|e| (500, format!("Error getting location data: {}", e)))?;
+    let json_str = serde_json::to_string(&locations)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+fn visits_helper() -> Result<Vec<Visit>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -132,7 +159,16 @@ pub(crate) fn visits() -> Result<Vec<Visit>, String> {
     Ok(results)
 }
 
-pub(crate) fn visits_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Visit>, String> {
+pub(crate) fn visits() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let visits = visits_helper()
+        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
+    let json_str = serde_json::to_string(&visits)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+fn visits_start_end_helper(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<Visit>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -158,6 +194,23 @@ pub(crate) fn visits_start_end(start: DateTime<Utc>, end: DateTime<Utc>) -> Resu
     Ok(results)
 }
 
+pub(crate) fn visits_start_end(start: &str, end: &str) -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let start = DateTime::parse_from_rfc3339(start)
+        .map_err(|e| (500, format!("Error parsing '{}' as start date: {}", start, e)))?
+        .with_timezone(&Utc);
+    let end = DateTime::parse_from_rfc3339(end)
+        .map_err(|e| (500, format!("Error parsing '{}' as end date: {}", end, e)))?
+        .with_timezone(&Utc);
+
+    let visits = visits_start_end_helper(start, end)
+        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
+    let json_str = serde_json::to_string(&visits)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+
 #[derive(Debug, Serialize)]
 pub(crate) struct TimeInMetric {
     // Abbreviated day of the week, i.e. Mon, Tue, etc.
@@ -167,7 +220,7 @@ pub(crate) struct TimeInMetric {
     avg_minutes: f64,
 }
 
-pub(crate) fn time_in() -> Result<Vec<TimeInMetric>, String> {
+fn time_in_helper() -> Result<Vec<TimeInMetric>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -184,6 +237,16 @@ pub(crate) fn time_in() -> Result<Vec<TimeInMetric>, String> {
     Ok(results)
 }
 
+pub(crate) fn time_in() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let times = time_in_helper()
+        .map_err(|e| (500, format!("Error getting time in data: {}", e)))?;
+    let json_str = serde_json::to_string(&times)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+
 #[derive(Debug, Serialize)]
 pub(crate) struct ProgramUsageMetric2 {
     hour_of_day: i32,
@@ -192,7 +255,7 @@ pub(crate) struct ProgramUsageMetric2 {
     count: i32,
 }
 
-pub(crate) fn top_foo() -> Result<Vec<ProgramUsageMetric2>, String> {
+fn top_limit_helper() -> Result<Vec<ProgramUsageMetric2>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -211,6 +274,16 @@ pub(crate) fn top_foo() -> Result<Vec<ProgramUsageMetric2>, String> {
     Ok(results)
 }
 
+pub(crate) fn top_limit() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let usage = top_limit_helper()
+        .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
+    let json_str = serde_json::to_string(&usage)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
+
+
 #[derive(Debug, Serialize)]
 pub(crate) struct ProgramUsageMetric {
     hour_of_day: f64,
@@ -219,7 +292,7 @@ pub(crate) struct ProgramUsageMetric {
     count: i64,
 }
 
-pub(crate) fn program_usage_by_hour() -> Result<Vec<ProgramUsageMetric>, String> {
+fn program_usage_by_hour_helper() -> Result<Vec<ProgramUsageMetric>, String> {
     let conn = Connection::connect(CONN_STR, TlsMode::None)
         .map_err(|e| format!("Error setting up connection with connection string '{}': {}", CONN_STR, e))?;
 
@@ -238,8 +311,16 @@ pub(crate) fn program_usage_by_hour() -> Result<Vec<ProgramUsageMetric>, String>
     Ok(results)
 }
 
+pub(crate) fn program_usage_by_hour() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let usage = program_usage_by_hour_helper()
+        .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
+    let json_str = serde_json::to_string(&usage)
+        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
+        .into_bytes();
+    Ok((200, json_str, "application/json; charset=utf-8"))
+}
 
-pub(crate) fn upload_visits(visits_json: String) -> Result<(), String> {
+fn upload_visits_helper(visits_json: String) -> Result<(), String> {
     let visits: Vec<Visit> = serde_json::from_str(&visits_json)
         .map_err(|e| format!("Error parsing visit data as json: {}", e))?;
     // create a bunch of lines like:
@@ -277,7 +358,17 @@ pub(crate) fn upload_visits(visits_json: String) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn upload_locations(locations_json: String) -> Result<(), String> {
+pub(crate) fn upload_visits() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let mut visits_json = String::new();
+    io::stdin().read_to_string(&mut visits_json)
+        .map_err(|e| (500, format!("Error reading visit data from body: {}", e)))?;
+    match upload_visits_helper(visits_json) {
+        Ok(_) => Ok((200, Vec::new(), "text/plain")),
+        Err(e) => Err((500, format!("Error uploading visit data: {}", e)))
+    }
+}
+
+fn upload_locations_helper(locations_json: String) -> Result<(), String> {
     let locations: Vec<Location> = serde_json::from_str(&locations_json)
         .map_err(|e| format!("Error parsing location data as json: {}", e))?;
     // create a bunch of lines like:
@@ -319,3 +410,12 @@ pub(crate) fn upload_locations(locations_json: String) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn upload_locations() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    let mut locations_json = String::new();
+    io::stdin().read_to_string(&mut locations_json)
+        .map_err(|e| (500, format!("Error reading location data from body: {}", e)))?;
+    match upload_locations_helper(locations_json) {
+        Ok(_) => Ok((200, Vec::new(), "text/plain")),
+        Err(e) => Err((500, format!("Error uploading location data: {}", e)))
+    }
+}

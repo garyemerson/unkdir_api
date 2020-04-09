@@ -1,6 +1,6 @@
 use serde_json::{to_string_pretty, json};
 
-use chrono::{DateTime, Utc, SecondsFormat};
+use chrono::{Utc, SecondsFormat};
 
 use std::time::{SystemTime, Duration};
 use std::{str, env};
@@ -8,7 +8,7 @@ use std::{fs, thread};
 use std::io::{self, Read, Write};
 use std::process::Command;
 
-use metrics::{program_usage_by_hour, top_foo, time_in, visits_start_end, visits,
+use metrics::{program_usage_by_hour, top_limit, time_in, visits_start_end, visits,
     locations_start_end, locations, upload_visits, upload_locations};
 use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
 
@@ -41,8 +41,7 @@ fn main() {
     ].join("\r\n");
 
     print!("{}\r\n\r\n", headers);
-    let stdout = io::stdout();
-    stdout
+    io::stdout()
         .lock()
         .write(&body)
         .expect("write body to stdout");
@@ -56,6 +55,10 @@ fn get_request_info() -> Result<(String, String), (i32, String)> {
     Ok((path, method))
 }
 
+// TODO:
+// - result with requestsuccess and requesterror strtuctures
+// - form implementation so functions can use ? operator but not need to explicitly return tuple will 500 status
+//  - alternatively: could make better helper functions structure
 fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
     let (path, method) = get_request_info()?;
     let resource: Vec<&str> = path.split('/')
@@ -64,14 +67,14 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
     match method.as_ref() {
         "GET" => {
             match &resource[..] {
-                ["top"] => {
-                    let usage = program_usage_by_hour()
-                        .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
-                    let json_str = serde_json::to_string(&usage)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
+                ["top"] => { program_usage_by_hour() },
+                ["toplimit"] => { top_limit() },
+                ["timein"] => { time_in() },
+                ["visits", start, end] => { visits_start_end(start, end) },
+                ["visits"] => { visits() },
+                ["locations", start, end] => { locations_start_end(start, end) },
+                ["locations"] => { locations() },
+                ["battery_history"] => { battery_history() },
 
                 ["sleep", num_secs_str] => {
                     let num_secs = num_secs_str.parse::<u64>()
@@ -88,86 +91,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                     Ok((200, body.into_bytes(), "text/plain"))
                 }
 
-                ["toplimit"] => {
-                    let usage = top_foo()
-                        .map_err(|e| (500, format!("Error getting program usage: {}", e)))?;
-                    let json_str = serde_json::to_string(&usage)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                ["timein"] => {
-                    let times = time_in()
-                        .map_err(|e| (500, format!("Error getting time in data: {}", e)))?;
-                    let json_str = serde_json::to_string(&times)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                ["visits", start, end] => {
-                    let start = DateTime::parse_from_rfc3339(start)
-                        .map_err(|e| (500, format!("Error parsing '{}' as start date: {}", start, e)))?
-                        .with_timezone(&Utc);
-                    let end = DateTime::parse_from_rfc3339(end)
-                        .map_err(|e| (500, format!("Error parsing '{}' as end date: {}", end, e)))?
-                        .with_timezone(&Utc);
-
-                    let visits = visits_start_end(start, end)
-                        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
-                    let json_str = serde_json::to_string(&visits)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                ["visits"] => {
-                    let visits = visits()
-                        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
-                    let json_str = serde_json::to_string(&visits)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                ["locations", start, end] => {
-                    let start = DateTime::parse_from_rfc3339(start)
-                        .map_err(|e| (500, format!("Error parsing '{}' as start date: {}", start, e)))?
-                        .with_timezone(&Utc);
-                    let end = DateTime::parse_from_rfc3339(end)
-                        .map_err(|e| (500, format!("Error parsing '{}' as end date: {}", end, e)))?
-                        .with_timezone(&Utc);
-
-                    let locations = locations_start_end(start, end)
-                        .map_err(|e| (500, format!("Error getting visit data: {}", e)))?;
-                    let json_str = serde_json::to_string(&locations)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                ["locations"] => {
-                    let locations = locations()
-                        .map_err(|e| (500, format!("Error getting location data: {}", e)))?;
-                    let json_str = serde_json::to_string(&locations)
-                        .map_err(|e| (500, format!("Error serializing to json: {}", e)))?
-                        .into_bytes();
-                    Ok((200, json_str, "application/json; charset=utf-8"))
-                },
-
-                // ["meme"] => {
-                //     let img_bytes = fs::read(KINDLE_MEME_FILE)
-                //         .map_err(|e| (500, format!("Error reading meme file {}: {}", KINDLE_MEME_FILE, e)))?;
-                //     Ok((200, img_bytes, "image/png"))
-                // },
-
-                ["battery_history"] => {
-                    let json = battery_history()
-                        .map_err(|e| (500, format!("Error getting battery history: {}", e)))?;
-                    Ok((200, json.into_bytes(), "application/json; charset=utf-8"))
-                },
-
                 ["foo"] => {
                     Ok((200, "bar".to_string().into_bytes(), "text/plain"))
                 },
@@ -180,49 +103,12 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
         "POST" => {
             match &resource[..] {
-                ["meme_status"] => {
-                    let response_bytes = meme_status()
-                        .map_err(|e| (500, format!("Error getting meme status: {}", e)))?;
-                    Ok((200, response_bytes, "application/octet-stream"))
-                },
-
-                ["update_meme_url"] => {
-                    update_meme_from_url()
-                        .map_err(|e| (500, format!("Error updating meme from url: {}", e)))?;
-                    Ok((200, Vec::new(), "text/plain"))
-                },
-
-                ["update_meme"] => {
-                    update_meme()
-                        .map_err(|e| (500, format!("Error updating meme: {}", e)))?;
-                    Ok((200, Vec::new(), "text/plain"))
-                },
-
-                ["update_notes"] => {
-                    update_notes()
-                        .map_err(|e| (500, format!("Error updating notes: {}", e)))?;
-                    Ok((200, Vec::new(), "text/plain"))
-                },
-
-                ["upload_visits"] => {
-                    let mut visits_json = String::new();
-                    io::stdin().read_to_string(&mut visits_json)
-                        .map_err(|e| (500, format!("Error reading visit data from body: {}", e)))?;
-                    match upload_visits(visits_json) {
-                        Ok(_) => Ok((200, Vec::new(), "text/plain")),
-                        Err(e) => Err((500, format!("Error uploading visit data: {}", e)))
-                    }
-                },
-
-                ["upload_locations"] => {
-                    let mut locations_json = String::new();
-                    io::stdin().read_to_string(&mut locations_json)
-                        .map_err(|e| (500, format!("Error reading location data from body: {}", e)))?;
-                    match upload_locations(locations_json) {
-                        Ok(_) => Ok((200, Vec::new(), "text/plain")),
-                        Err(e) => Err((500, format!("Error uploading location data: {}", e)))
-                    }
-                },
+                ["meme_status"] => { meme_status() },
+                ["update_meme_url"] => { update_meme_from_url() },
+                ["update_meme"] => { update_meme() },
+                ["update_notes"] => { update_notes() },
+                ["upload_visits"] => { upload_visits() },
+                ["upload_locations"] => { upload_locations() },
 
                 _ => {
                     Err((400, format!("Unknown POST resource {}", path)))
@@ -237,7 +123,7 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
 }
 
-fn update_notes() -> Result<(), String> {
+fn update_notes_helper() -> Result<(), String> {
     let mut notes_bytes = Vec::new();
     io::stdin().read_to_end(&mut notes_bytes)
         .map_err(|e| format!("Error reading notes bytes from stdin: {}", e))?;
@@ -255,8 +141,8 @@ fn update_notes() -> Result<(), String> {
         .arg(NOTES_FILE)
         .output()
         .map_err(|e| format!("Error excuting git status on file {}: {}", NOTES_FILE, e))?;
-    log_error!("status stdout: '{}'", str::from_utf8(&status_output.stdout).unwrap());
-    log_error!("status stderr: '{}'", str::from_utf8(&status_output.stderr).unwrap());
+    log_error!("status stdout: '{}'", str::from_utf8(&status_output.stdout).unwrap_or("<error convert stdout to utf8>"));
+    log_error!("status stderr: '{}'", str::from_utf8(&status_output.stderr).unwrap_or("<error convert stderr to utf8>"));
     if status_output.stdout.as_slice().starts_with(b" M") {
         let commit_output = Command::new("git")
             .arg("commit")
@@ -265,11 +151,17 @@ fn update_notes() -> Result<(), String> {
             .arg("")
             .output()
             .map_err(|e| format!("Error excuting git commit: {}", e))?;
-        log_error!("commit stdout: '{}'", str::from_utf8(&commit_output.stdout).unwrap());
-        log_error!("commit stderr: '{}'", str::from_utf8(&commit_output.stderr).unwrap());
+        log_error!("commit stdout: '{}'", str::from_utf8(&commit_output.stdout).unwrap_or("<error convert stdout to utf8>"));
+        log_error!("commit stderr: '{}'", str::from_utf8(&commit_output.stderr).unwrap_or("<error convert stderr to utf8>"));
     }
 
     Ok(())
+}
+
+fn update_notes() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    update_notes_helper()
+        .map_err(|e| (500, format!("Error updating notes: {}", e)))?;
+    Ok((200, Vec::new(), "text/plain"))
 }
 
 fn json_msg(msg: &str) -> String {
