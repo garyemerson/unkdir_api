@@ -253,6 +253,7 @@ fn create_kindle_format_img(img_bytes: &Vec<u8>) -> Result<(), String> {
         "-background", "black",
         "-grayscale", "Rec709Luma",
         "-strip",
+        "-colors", "15",
         // "-auto-gamma",
         // "-auto-level",
         // "-normalize",
