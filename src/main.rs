@@ -43,7 +43,7 @@ fn main() {
     print!("{}\r\n\r\n", headers);
     io::stdout()
         .lock()
-        .write(&body)
+        .write_all(&body)
         .expect("write body to stdout");
 }
 
