@@ -48,7 +48,7 @@ pub(crate) fn battery_history() -> Result<(i32, Vec<u8>, &'static str), (i32, St
     Ok((200, json.into_bytes(), "application/json; charset=utf-8"))
 }
 
-pub(crate) fn meme_status_helper() -> Result<Vec<u8>, String> {
+fn meme_status_helper() -> Result<Vec<u8>, String> {
     let mut battery_percent_and_meme_id = String::new();
     io::stdin().read_to_string(&mut battery_percent_and_meme_id)
         .map_err(|e| format!("Error reading battery percent from body from stdin: {}", e))?;

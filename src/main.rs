@@ -86,7 +86,8 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["vars"] => {
                     let mut body = format!("{:?}\n\n", SystemTime::now());
                     for (key, value) in env::vars() {
-                        body.push_str(&format!("{}: {}\n", key, value));
+                        let json_str = serde_json::to_string(&serde_json::Value::String(value)).expect("json str");
+                        body.push_str(&format!("{}: {}\n", key, json_str.trim_matches('"')));
                     }
                     Ok((200, body.into_bytes(), "text/plain"))
                 }
