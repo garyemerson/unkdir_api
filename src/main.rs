@@ -1,16 +1,12 @@
-use serde_json::{to_string_pretty, json};
-
 use chrono::{Utc, SecondsFormat};
-
-use std::time::{SystemTime, Duration};
-use std::{str, env};
-use std::{fs, thread};
-use std::io::{self, Read, Write};
-use std::process::Command;
-
+use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
 use metrics::{program_usage_by_hour, top_limit, time_in, visits_start_end, visits,
     locations_start_end, locations, upload_visits, upload_locations};
-use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
+use std::{fs, thread};
+use std::{str, env};
+use std::io::{self, Read, Write};
+use std::process::Command;
+use std::time::{SystemTime, Duration};
 
 macro_rules! log_error {
     ($($tts:tt)*) => {
@@ -59,6 +55,8 @@ fn get_request_info() -> Result<(String, String), (i32, String)> {
 // - result with requestsuccess and requesterror strtuctures
 // - form implementation so functions can use ? operator but not need to explicitly return tuple will 500 status
 //  - alternatively: could make better helper functions structure
+// ---
+// returns: Result<(status, body, content/mime type), (status, error msg)>
 fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
     let (path, method) = get_request_info()?;
     let resource: Vec<&str> = path.split('/')
@@ -86,7 +84,7 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["vars"] => {
                     let mut body = format!("{:?}\n\n", SystemTime::now());
                     for (key, value) in env::vars() {
-                        let json_str = serde_json::to_string(&serde_json::Value::String(value)).expect("json str");
+                        let json_str = json::stringify(json::JsonValue::String(value));
                         body.push_str(&format!("{}: {}\n", key, json_str.trim_matches('"')));
                     }
                     Ok((200, body.into_bytes(), "text/plain"))
@@ -166,7 +164,7 @@ fn update_notes() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 }
 
 fn json_msg(msg: &str) -> String {
-    let mut s = to_string_pretty(&json!({"message": msg})).unwrap();
+    let mut s = json::stringify(json::object!{message: msg});
     s.retain(|c| c != '\n');
     s
 }

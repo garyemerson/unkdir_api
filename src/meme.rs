@@ -1,16 +1,9 @@
-use chrono::{Local, Utc, SecondsFormat};
-//use image::imageops::colorops::contrast;
-// use image::imageops::{resize, overlay /*, brighten*/};
-// use image::ImageOutputFormat;
-// use image::png::PNGEncoder;
-// use image::{Pixel, GenericImageView, ImageBuffer, Luma, DynamicImage, FilterType};
-use serde_json::{Value, json};
-
+use chrono::{Utc, SecondsFormat};
+use json::JsonValue;
 use std::{str, env};
-use std::process::{Command, Stdio};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-// use std::path::Path;
+use std::process::{Command, Stdio};
 use std::str::Split;
 
 
@@ -25,21 +18,17 @@ fn battery_history_helper() -> Result<String, String> {
     let stats_raw = fs::read_to_string(BATTERY_FILE_PATH)
         .map_err(|e| format!("Error reading battery file {}: {}", BATTERY_FILE_PATH, e))?;
     //return Ok(stats_raw);
-    let stats: Vec</*String*/Value> = stats_raw.split('\n')
+    let stats: Vec<JsonValue> = stats_raw.split('\n')
         .rev()
         .take(10_000)
         .map(|l: &str| l.split("||"))
         .filter_map(|mut split_line: Split<'_, &str>| {
-            let date = split_line.next()?;
-            let percent = split_line.next()?.parse::<i32>().ok()?;
-            //Some(format!("{{\"date\": {}, \"percent\": {}}}", date, percent))
-            Some(json!({"date": date, "percent": percent}))
+            let date = split_line.next()?.to_string();
+            let percent = split_line.next()?.parse::<i64>().ok()?;
+            Some(json::object!{"date": date, "percent": percent})
         })
         .collect();
-
-    //Ok(format!("[{}]", stats.join(",")))
-    serde_json::to_string(&stats)
-        .map_err(|e| format!("Error converting to json string: {}", e))
+    Ok(json::stringify(stats))
 }
 
 pub(crate) fn battery_history() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
@@ -291,7 +280,8 @@ fn save_battery_percentage(battery_percent: String) -> Result<(), String> {
         .append(true)
         .open(BATTERY_FILE_PATH)
         .map_err(|e| format!("Error opening file {} : {}", BATTERY_FILE_PATH, e))?;
-    let bytes = format!("{}||{}\n", Local::now(), battery_percent).into_bytes();
+    let time = chrono::offset::Local::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let bytes = format!("{}||{}\n", time, battery_percent).into_bytes();
     battery_file.write_all(&bytes)
         .map_err(|e| format!("Error writing to file {}: {}", BATTERY_FILE_PATH, e))?;
 
