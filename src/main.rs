@@ -5,8 +5,13 @@ use metrics::{program_usage_by_hour, top_limit, time_in, visits_start_end, visit
 use std::{fs, thread};
 use std::{str, env};
 use std::io::{self, Read, Write};
+use std::ops::Index;
 use std::process::Command;
 use std::time::{SystemTime, Duration};
+use file_lock::{FileLock, FileOptions};
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+
 
 macro_rules! log_error {
     ($($tts:tt)*) => {
@@ -22,6 +27,7 @@ mod metrics;
 
 const NOTES_DIR: &str = "/root/unkdir/doc_root/notes";
 const NOTES_FILE: &str = "/root/unkdir/doc_root/notes/contents";
+const NOTES_LOCK_FILE: &str = "/root/unkdir/doc_root/notes/lock";
 
 fn main() {
     let (status, body, content_type): (i32, Vec<u8>, &str) = handle_request()
@@ -106,6 +112,7 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["update_meme_url"] => { update_meme_from_url() },
                 ["update_meme"] => { update_meme() },
                 ["update_notes"] => { update_notes() },
+                ["update_notes_json"] => { update_notes_json() },
                 ["upload_visits"] => { upload_visits() },
                 ["upload_locations"] => { upload_locations() },
 
@@ -123,13 +130,23 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 }
 
 fn update_notes_helper() -> Result<(), String> {
+    let filelock = FileLock::lock(&NOTES_LOCK_FILE, /*is_blocking*/ true, FileOptions::new().write(true))
+        .map_err(|e| format!("Error locking notes lock file: {}", e))?;
     let mut notes_bytes = Vec::new();
     io::stdin().read_to_end(&mut notes_bytes)
         .map_err(|e| format!("Error reading notes bytes from stdin: {}", e))?;
+    log_error!("notes update with {} bytes", notes_bytes.len());
     let notes = str::from_utf8(&notes_bytes)
         .map_err(|e| format!("Error parsing POST data as utf8 string: {}", e))?;
-    fs::write(NOTES_FILE, notes.to_string().into_bytes())
-        .map_err(|e| format!("Error writing notes to file {}: {}", NOTES_FILE, e))?;
+
+    let mut rng = rand::thread_rng();
+    let rand_suffix: String = (0..5).map(|_| rng.sample(Alphanumeric) as char).collect();
+    let tmp_file = format!("{}.{}", NOTES_FILE, rand_suffix);
+
+    fs::write(&tmp_file, notes.to_string().into_bytes())
+        .map_err(|e| format!("Error writing notes to tmp file {}: {}", &tmp_file, e))?;
+    fs::rename(&tmp_file, NOTES_FILE)
+        .map_err(|e| format!("Error renaming tmp file {} to notes file {}: {}", &tmp_file, NOTES_FILE, e))?;
     env::set_current_dir(NOTES_DIR)
         .map_err(|e| format!("Error changing directory to {}: {}", NOTES_DIR, e))?;
     env::set_var("GIT_DIR", "history");
@@ -160,6 +177,63 @@ fn update_notes_helper() -> Result<(), String> {
 fn update_notes() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
     update_notes_helper()
         .map_err(|e| (500, format!("Error updating notes: {}", e)))?;
+    Ok((200, Vec::new(), "text/plain"))
+}
+
+fn update_notes_json_helper() -> Result<(), String> {
+    let filelock = FileLock::lock(&NOTES_LOCK_FILE, /*is_blocking*/ true, FileOptions::new().write(true))
+        .map_err(|e| format!("Error locking notes lock file: {}", e))?;
+    let mut notes_bytes = Vec::new();
+    io::stdin().read_to_end(&mut notes_bytes)
+        .map_err(|e| format!("Error reading notes bytes from stdin: {}", e))?;
+    log_error!("notes update with {} bytes", notes_bytes.len());
+    let notes_json = str::from_utf8(&notes_bytes)
+        .map_err(|e| format!("Error parsing POST data as utf8 string: {}", e))?;
+    let notes: String = json::parse(notes_json)
+        .map_err(|e| format!("Error parsing json: {}", e))?
+        .index("notes")
+        .as_str()
+        .ok_or_else(|| format!("notes key not found in json object"))?
+        .to_string();
+
+    let mut rng = rand::thread_rng();
+    let rand_suffix: String = (0..5).map(|_| rng.sample(Alphanumeric) as char).collect();
+    let tmp_file = format!("{}.{}", NOTES_FILE, rand_suffix);
+    fs::write(&tmp_file, notes.into_bytes())
+        .map_err(|e| format!("Error writing notes to tmp file {}: {}", &tmp_file, e))?;
+    fs::rename(&tmp_file, NOTES_FILE)
+        .map_err(|e| format!("Error renaming tmp file {} to notes file {}: {}", &tmp_file, NOTES_FILE, e))?;
+
+    env::set_current_dir(NOTES_DIR)
+        .map_err(|e| format!("Error changing directory to {}: {}", NOTES_DIR, e))?;
+    env::set_var("GIT_DIR", "history");
+    env::set_var("GIT_WORK_TREE", ".");
+    let status_output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .arg(NOTES_FILE)
+        .output()
+        .map_err(|e| format!("Error excuting git status on file {}: {}", NOTES_FILE, e))?;
+    log_error!("status stdout: '{}'", str::from_utf8(&status_output.stdout).unwrap_or("<error convert stdout to utf8>"));
+    log_error!("status stderr: '{}'", str::from_utf8(&status_output.stderr).unwrap_or("<error convert stderr to utf8>"));
+    if status_output.stdout.as_slice().starts_with(b" M") {
+        let commit_output = Command::new("git")
+            .arg("commit")
+            .arg("--allow-empty-message")
+            .arg("-am")
+            .arg("")
+            .output()
+            .map_err(|e| format!("Error excuting git commit: {}", e))?;
+        log_error!("commit stdout: '{}'", str::from_utf8(&commit_output.stdout).unwrap_or("<error convert stdout to utf8>"));
+        log_error!("commit stderr: '{}'", str::from_utf8(&commit_output.stderr).unwrap_or("<error convert stderr to utf8>"));
+    }
+
+    Ok(())
+}
+
+fn update_notes_json() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
+    update_notes_helper()
+        .map_err(|e| (500, format!("Error updating notes via json: {}", e)))?;
     Ok((200, Vec::new(), "text/plain"))
 }
 
