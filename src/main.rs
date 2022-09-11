@@ -1,5 +1,4 @@
 use chrono::{Utc, SecondsFormat};
-use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
 use metrics::computer_activity::{program_usage_by_hour, top_limit, time_in};
 use std::{thread, str, env};
 use std::io::{self, Write};
@@ -15,15 +14,6 @@ macro_rules! log_error {
     }
 }
 
-macro_rules! try_block {
-    { $($token:tt)* } => {{
-        (|| {
-            $($token)*
-        })()
-    }}
-}
-
-mod meme;
 mod metrics;
 
 fn main() {
@@ -81,7 +71,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["top"] => { program_usage_by_hour() },
                 ["toplimit"] => { top_limit() },
                 ["timein"] => { time_in() },
-                ["battery_history"] => { battery_history() },
 
                 ["sleep", num_secs_str] => {
                     let num_secs = num_secs_str.parse::<u64>()
@@ -105,41 +94,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
 
                 _ => {
                     Err((400, format!("Unknown GET resource {}", path)))
-                },
-            }
-        },
-
-        "POST" => {
-            match &resource[..] {
-                ["meme_status"] => { meme_status() },
-                ["update_meme_url"] => { update_meme_from_url() },
-                ["update_meme"] => { update_meme() },
-
-                // ["test"] => {
-                //     log_error!("in test api");
-                //     try_block! {
-                //         let mut input_bytes = Vec::new();
-                //         io::stdin().read_to_end(&mut input_bytes)
-                //             .map_err(|e| format!("Error reading notes bytes from stdin: {}", e))?;
-                //         log_error!("{} input bytes", input_bytes.len());
-                //         let notes_json = str::from_utf8(&input_bytes)
-                //             .map_err(|e| format!("Error parsing body as utf8 string: {}", e))?;
-                //         let notes: String = json::parse(notes_json)
-                //             .map_err(|e| format!("Error parsing json: {}", e))?
-                //             .index("notes")
-                //             .as_str()
-                //             .ok_or_else(|| format!("notes key not found in json object"))?
-                //             .to_string();
-                //         log_error!("notes: {}", notes);
-                //         log_error!("notes naive len: {}", notes.len());
-                //         log_error!("notes chars len: {}", notes.chars().count());
-                //         Ok(())
-                //     }.map_err(|e: String| (500, format!("Error in test api: {}", e)))?;
-                //     Ok((200, Vec::new(), "text/plain"))
-                // }
-
-                _ => {
-                    Err((400, format!("Unknown POST resource {}", path)))
                 },
             }
         },
