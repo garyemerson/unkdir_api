@@ -1,7 +1,6 @@
 use chrono::{Utc, SecondsFormat};
 use file_lock::{FileLock, FileOptions};
 use meme::{battery_history, meme_status, update_meme_from_url, update_meme};
-use metrics::{visits_start_end, visits, locations_start_end, locations, upload_visits, upload_locations};
 use metrics::computer_activity::{program_usage_by_hour, top_limit, time_in};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -91,10 +90,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["top"] => { program_usage_by_hour() },
                 ["toplimit"] => { top_limit() },
                 ["timein"] => { time_in() },
-                ["visits", start, end] => { visits_start_end(start, end) },
-                ["visits"] => { visits() },
-                ["locations", start, end] => { locations_start_end(start, end) },
-                ["locations"] => { locations() },
                 ["battery_history"] => { battery_history() },
 
                 ["sleep", num_secs_str] => {
@@ -131,8 +126,6 @@ fn handle_request() -> Result<(i32, Vec<u8>, &'static str), (i32, String)> {
                 ["update_notes"] => { update_notes() },
                 ["update_notes_json"] => { update_notes_json() },
                 ["update_notes_incremental"] => { update_notes_incremental() },
-                ["upload_visits"] => { upload_visits() },
-                ["upload_locations"] => { upload_locations() },
 
                 // ["test"] => {
                 //     log_error!("in test api");
@@ -285,20 +278,20 @@ fn hash_str(s: &str) -> u32 {
     hash.0
 }
 
-fn hash_vec(bytes: &Vec<u8>) -> u32 {
-    let mut hash = std::num::Wrapping(0u32);
-    let mut idx = 0usize;
-    for _ in 0..((bytes.len() as f32 / 4f32).ceil() as usize) {
-      let a = *bytes.get(idx + 0).unwrap_or(&0) as u32;
-      let b = *bytes.get(idx + 1).unwrap_or(&0) as u32;
-      let c = *bytes.get(idx + 2).unwrap_or(&0) as u32;
-      let d = *bytes.get(idx + 3).unwrap_or(&0) as u32;
-      let x = (a << 24) | (b << 16) | (c << 8) | d;
-      hash = (hash << 5) - hash + std::num::Wrapping(x);
-      idx += 4;
-    }
-    hash.0
-}
+// fn hash_vec(bytes: &Vec<u8>) -> u32 {
+//     let mut hash = std::num::Wrapping(0u32);
+//     let mut idx = 0usize;
+//     for _ in 0..((bytes.len() as f32 / 4f32).ceil() as usize) {
+//       let a = *bytes.get(idx + 0).unwrap_or(&0) as u32;
+//       let b = *bytes.get(idx + 1).unwrap_or(&0) as u32;
+//       let c = *bytes.get(idx + 2).unwrap_or(&0) as u32;
+//       let d = *bytes.get(idx + 3).unwrap_or(&0) as u32;
+//       let x = (a << 24) | (b << 16) | (c << 8) | d;
+//       hash = (hash << 5) - hash + std::num::Wrapping(x);
+//       idx += 4;
+//     }
+//     hash.0
+// }
 
 fn update_notes_file_and_git_history(notes: &str) -> Result<(), String> {
     // update file contents
